@@ -195,7 +195,7 @@ function HallCheckout() {
         alert('Booking failed, try again');
       }
     } catch (err) {
-      alert('Server error, backend run aagudha nu check pannunga');
+      alert('Server error. Please check whether the backend server is running.');
     } finally {
       setSubmitting(false);
     }
@@ -211,7 +211,7 @@ function HallCheckout() {
     try {
       const scriptOk = await loadRazorpayScript();
       if (!scriptOk) {
-        alert('Razorpay load aagala. Internet connection check pannunga.');
+        alert('Razorpay could not be loaded. Please check your internet connection and try again.');
         setPayingNow(false);
         return;
       }
@@ -226,7 +226,7 @@ function HallCheckout() {
 
       if (!orderData.orderId) {
         console.error('Create order response:', orderData);
-        alert('Payment order create panna mudiyala. Backend server run aaguthaa nu check pannunga.');
+        alert('Unable to create the payment order. Please check whether the backend server is running.');
         setPayingNow(false);
         return;
       }
@@ -256,11 +256,11 @@ function HallCheckout() {
             if (verifyData.verified) {
               onSuccess(response.razorpay_payment_id);
             } else {
-              alert('Payment verify aagala! Amount debit aayirundhaalum booking confirm aagala - support ah contact pannunga.');
+              alert('Payment could not be verified. Even if the amount has been debited, your booking has not been confirmed. Please contact support.');
             }
           } catch (err) {
             console.error('Verification call failed:', err);
-            alert('Payment verify pannum pothu error. Support ah contact pannunga.');
+            alert('An error occurred while verifying the payment. Please contact support.');
           } finally {
             setPayingNow(false);
           }
@@ -283,7 +283,7 @@ function HallCheckout() {
       rzp.open();
     } catch (err) {
       console.error('Razorpay payment failed:', err);
-      alert('Payment process pannum pothu error vandhuchu. Try again pannunga.');
+      alert('An error occurred while processing the payment. Please try again.');
       setPayingNow(false);
     }
   };

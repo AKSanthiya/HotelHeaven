@@ -958,7 +958,8 @@ function Admin() {
                   className="text-muted text-center mb-0 mt-2"
                   style={{ fontSize: "0.85rem" }}
                 >
-                  🌹 Periya petal = adhiga sales
+                  🌹 **Bigger petal = Higher sales**
+
                 </p>
               )}
               {analyticsRange === "monthly" && (
@@ -966,7 +967,8 @@ function Admin() {
                   className="text-muted text-center mb-0 mt-2"
                   style={{ fontSize: "0.85rem" }}
                 >
-                  🫧 Periya bubble = adhiga sales
+                  🫧 **Bigger bubble = Higher sales**
+
                 </p>
               )}
             </div>
