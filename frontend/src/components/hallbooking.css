@@ -1,0 +1,148 @@
+.hall-booking-page {
+  padding: 40px 20px;
+  max-width: 1300px;
+  margin: 0 auto;
+}
+
+.hall-booking-header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.hall-booking-header h1 {
+  font-size: 2.2rem;
+  color: #6a1b9a;
+}
+
+.hall-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 30px;
+}
+
+.hall-card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  overflow: hidden;
+  transition: transform 0.2s ease;
+}
+
+.hall-card:hover {
+  transform: translateY(-6px);
+}
+
+.hall-image-wrapper {
+  position: relative;
+  cursor: pointer;
+  overflow: hidden;
+  height: 220px;
+}
+
+.hall-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.hall-image-wrapper:hover .hall-image {
+  transform: scale(1.08);
+}
+
+.zoom-hint {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+
+.hall-card-body {
+  padding: 20px;
+}
+
+.hall-card-body h2 {
+  color: #4a148c;
+  margin-bottom: 12px;
+}
+
+.hall-section {
+  margin-bottom: 14px;
+}
+
+.hall-section h4 {
+  font-size: 0.95rem;
+  margin-bottom: 6px;
+  color: #333;
+}
+
+.hall-section ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hall-section ul li {
+  background: #f3e5f5;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+}
+
+.hall-price {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #2e7d32;
+  margin: 14px 0;
+}
+
+.book-now-btn {
+  width: 100%;
+  padding: 12px;
+  background: #6a1b9a;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.book-now-btn:hover {
+  background: #4a148c;
+}
+
+.lightbox-overlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.lightbox-image {
+  max-width: 90%;
+  max-height: 85%;
+  border-radius: 8px;
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 30px;
+  right: 40px;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 2rem;
+  cursor: pointer;
+}

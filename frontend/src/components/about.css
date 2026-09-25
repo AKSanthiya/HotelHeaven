@@ -1,0 +1,42 @@
+/* Fade-in base */
+.about-fade {
+  opacity: 0;
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+
+.about-fade-left {
+  transform: translateX(-40px);
+}
+
+.about-fade-right {
+  transform: translateX(40px);
+}
+
+.about-visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Stay Dine Celebrate Enjoy word reveal */
+.stay-dine-tagline {
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.tagline-word {
+  opacity: 0;
+  display: inline-block;
+  transform: translateY(15px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+  color: #d4a017;
+}
+
+.tagline-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.tagline-dot {
+  color: #999;
+  font-weight: 400;
+}
