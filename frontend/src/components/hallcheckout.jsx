@@ -182,7 +182,7 @@ function HallCheckout() {
     };
 
     try {
-      const res = await fetch('http://localhost:5000/api/book', {
+      const res = await fetch('https://hotelheaven.onrender.com/api/book', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bookingData)
@@ -217,7 +217,7 @@ function HallCheckout() {
       }
 
       // Step 1: Backend la order create pannurom
-      const orderRes = await fetch('http://localhost:5000/api/create-order', {
+      const orderRes = await fetch('https://hotelheaven.onrender.com/api/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount }),
@@ -242,7 +242,7 @@ function HallCheckout() {
         handler: async function (response) {
           // Step 3: Payment success aana, backend la signature verify pannurom
           try {
-            const verifyRes = await fetch('http://localhost:5000/api/verify-payment', {
+            const verifyRes = await fetch('https://hotelheaven.onrender.com/api/verify-payment', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({

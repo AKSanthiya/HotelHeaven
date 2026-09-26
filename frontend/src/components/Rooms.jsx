@@ -79,7 +79,7 @@ function Rooms() {
   React.useEffect(() => {
     const fetchBookedRooms = async () => {
       try {
-        const res = await fetch("http://localhost:5000/api/booked-rooms");
+        const res = await fetch("https://hotelheaven.onrender.com/api/booked-rooms");
         const data = await res.json();
         setBookedRooms(data); // e.g. ["Standard - Room 102", "Deluxe - Room 201"]
       } catch (err) {

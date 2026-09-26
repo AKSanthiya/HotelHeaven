@@ -214,7 +214,7 @@ function RoomCheckout() {
   }, []);
 
   React.useEffect(() => {
-    fetch("http://localhost:5000/api/booked-parking")
+    fetch("https://hotelheaven.onrender.com/api/booked-parking")
       .then((res) => res.json())
       .then((data) => {
         setParkingBookedSlots(data.map((s) => Number(s)));
@@ -293,7 +293,7 @@ function RoomCheckout() {
         billTotal += parkingTotal;
       }
 
-      await fetch("http://localhost:5000/api/send-bill-email", {
+      await fetch("https://hotelheaven.onrender.com/api/send-bill-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -329,7 +329,7 @@ function RoomCheckout() {
       // Ovvoru room-um separate booking-ah backend ku anupurom
       await Promise.all(
         cart.map((item) =>
-          fetch("http://localhost:5000/api/book", {
+          fetch("https://hotelheaven.onrender.com/api/book", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -381,7 +381,7 @@ function RoomCheckout() {
   const placeParkingBooking = async (paidNowLabel, paymentStatus, utr = "") => {
     setParkingSubmitting(true);
     try {
-      await fetch("http://localhost:5000/api/book", {
+      await fetch("https://hotelheaven.onrender.com/api/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -435,7 +435,7 @@ function RoomCheckout() {
       }
 
       // Step 1: Backend la order create pannurom
-      const orderRes = await fetch("http://localhost:5000/api/create-order", {
+      const orderRes = await fetch("https://hotelheaven.onrender.com/api/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amount }),
@@ -460,7 +460,7 @@ function RoomCheckout() {
         handler: async function (response) {
           // Step 3: Payment success aana, backend la signature verify pannurom
           try {
-            const verifyRes = await fetch("http://localhost:5000/api/verify-payment", {
+            const verifyRes = await fetch("https://hotelheaven.onrender.com/api/verify-payment", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({

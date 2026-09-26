@@ -24,7 +24,7 @@ function Home() {
       return;
     }
 
-    fetch(`http://localhost:5000/api/voucher-status/${encodeURIComponent(user.email)}`)
+    fetch(`https://hotelheaven.onrender.com/api/voucher-status/${encodeURIComponent(user.email)}`)
       .then((res) => res.json())
       .then((data) => setVoucher(data.activeVoucher))
       .catch((err) => console.error("Voucher status fetch failed:", err));

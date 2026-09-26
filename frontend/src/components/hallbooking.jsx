@@ -94,7 +94,7 @@ function HallBooking() {
   useEffect(() => {
     const fetchBookedHalls = async () => {
       try {
-        const res = await fetch('http://localhost:5000/api/booked-halls');
+        const res = await fetch('https://hotelheaven.onrender.com/api/booked-halls');
         const data = await res.json();
         setBookedHalls(data); // e.g. ["Conference Hall", "Royal Party Hall"]
       } catch (err) {

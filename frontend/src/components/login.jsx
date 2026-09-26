@@ -69,7 +69,7 @@ function Login() {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
 
-      fetch("http://127.0.0.1:5000/send-welcome-email", {
+      fetch("https://hotelheaven.onrender.com/send-welcome-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: user.email, name: user.displayName }),

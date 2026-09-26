@@ -32,7 +32,7 @@ function Chatbot() {
     setIsTyping(true);
 
     try {
-      const res = await fetch("http://localhost:5000/api/chatbot", {
+      const res = await fetch("https://hotelheaven.onrender.com/api/chatbot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: trimmed }),

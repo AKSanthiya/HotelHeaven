@@ -232,7 +232,7 @@ function Admin() {
     setSearchedText(text);
     try {
       const res = await fetch(
-        `http://localhost:5000/api/bookings?orderId=${encodeURIComponent(text)}`
+        `https://hotelheaven.onrender.com/api/bookings?orderId=${encodeURIComponent(text)}`
       );
       const data = await res.json();
       setSearchResults(Array.isArray(data) ? data : []);
@@ -258,8 +258,8 @@ function Admin() {
       try {
         const url =
           filter === "all"
-            ? "http://localhost:5000/api/bookings"
-            : `http://localhost:5000/api/bookings?type=${filter}`;
+            ? "https://hotelheaven.onrender.com/api/bookings"
+            : `https://hotelheaven.onrender.com/api/bookings?type=${filter}`;
 
         const res = await fetch(url);
         const data = await res.json();
@@ -280,7 +280,7 @@ function Admin() {
     const fetchAnalytics = async () => {
       setAnalyticsLoading(true);
       try {
-        const base = `http://localhost:5000/api/analytics?range=${analyticsRange}`;
+        const base = `https://hotelheaven.onrender.com/api/analytics?range=${analyticsRange}`;
 
         // 1 call for the overall period list (chronological order) + 1 call per category
         const responses = await Promise.all([

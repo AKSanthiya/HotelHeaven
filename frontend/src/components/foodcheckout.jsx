@@ -179,7 +179,7 @@ function FoodCheckout() {
     if (voucherId) return; // already have it from navigation state
     if (!auth.currentUser?.email) return;
 
-    fetch(`http://localhost:5000/api/voucher-status/${encodeURIComponent(auth.currentUser.email)}`)
+    fetch(`https://hotelheaven.onrender.com/api/voucher-status/${encodeURIComponent(auth.currentUser.email)}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.activeVoucher) {
@@ -195,7 +195,7 @@ function FoodCheckout() {
     const fetchBookedTables = async () => {
       try {
         const res = await fetch(
-          "http://localhost:5000/api/bookings?type=food"
+          "https://hotelheaven.onrender.com/api/bookings?type=food"
         );
         const data = await res.json();
         const booked = data
@@ -252,7 +252,7 @@ function FoodCheckout() {
         quantity: item.quantity || 1,
       }));
 
-      await fetch("http://localhost:5000/api/send-bill-email", {
+      await fetch("https://hotelheaven.onrender.com/api/send-bill-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -288,7 +288,7 @@ function FoodCheckout() {
       // but note the voucher discount and payment method in details for admin visibility.
       await Promise.all(
         cart.map((item) =>
-          fetch("http://localhost:5000/api/book", {
+          fetch("https://hotelheaven.onrender.com/api/book", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -317,7 +317,7 @@ function FoodCheckout() {
       // If a voucher is active, redeem it against this order's total
       let localRedeemResult = null;
       if (hasVoucher) {
-        const res = await fetch("http://localhost:5000/api/voucher/redeem", {
+        const res = await fetch("https://hotelheaven.onrender.com/api/voucher/redeem", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ voucherId, orderAmount: total }),
@@ -366,7 +366,7 @@ function FoodCheckout() {
       }
 
       // Step 1: Backend la order create pannurom
-      const orderRes = await fetch("http://localhost:5000/api/create-order", {
+      const orderRes = await fetch("https://hotelheaven.onrender.com/api/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amount }),
@@ -391,7 +391,7 @@ function FoodCheckout() {
         handler: async function (response) {
           // Step 3: Payment success aana, backend la signature verify pannurom
           try {
-            const verifyRes = await fetch("http://localhost:5000/api/verify-payment", {
+            const verifyRes = await fetch("https://hotelheaven.onrender.com/api/verify-payment", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({

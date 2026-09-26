@@ -46,7 +46,7 @@ export default function Parking() {
 
   const fetchBookedSlots = () => {
     setLoading(true);
-    fetch('http://localhost:5000/api/booked-parking')
+    fetch('https://hotelheaven.onrender.com/api/booked-parking')
       .then((res) => res.json())
       .then((data) => {
         setBooked(data.map((s) => Number(s)));
@@ -101,7 +101,7 @@ export default function Parking() {
     };
 
     try {
-      const res = await fetch('http://localhost:5000/api/book', {
+      const res = await fetch('https://hotelheaven.onrender.com/api/book', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bookingData),
