@@ -1,5 +1,5 @@
 import React from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import About from "./components/About";
 import Navbar from "./components/Navbar";
 import Home from "./components/home";
@@ -15,10 +15,13 @@ import Parking from "./components/parking";
 import ParkingCheckout from "./components/parkingcheckout";
 import Chatbot from "./components/Chatbot";
 
-function App() {
+function AppContent() {
+  const location = useLocation();
+  const hideChrome = location.pathname === "/";
+
   return (
-    <BrowserRouter>
-      <Navbar />
+    <>
+      {!hideChrome && <Navbar />}
 
       <Routes>
         <Route path="/" element={<Login />} />
@@ -36,7 +39,15 @@ function App() {
         <Route path="/parking-checkout" element={<ParkingCheckout />} />
       </Routes>
 
-      <Chatbot />
+      {!hideChrome && <Chatbot />}
+    </>
+  );
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <AppContent />
     </BrowserRouter>
   );
 }
