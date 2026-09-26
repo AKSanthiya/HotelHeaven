@@ -1,14 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "../firebase";
 import logo from "../assets/logo.jpeg";
 
 function Navbar() {
-  const location = useLocation();
   const navigate = useNavigate();
-  const isHome = location.pathname === "/";
-
   const [user, setUser] = useState(null);
 
   useEffect(() => {
@@ -27,21 +24,19 @@ function Navbar() {
     }
   };
 
-  if (!isHome) return null;
-
   return (
     <nav className="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
       <div className="container">
 
         {/* Hotel Name / Logo */}
-        <a className="navbar-brand fw-bold fs-3 d-flex align-items-center gap-2" href="#home">
+        <Link className="navbar-brand fw-bold fs-3 d-flex align-items-center gap-2" to="/home">
           <img
             src={logo}
             alt="Hotel Heaven Logo"
             style={{ height: "45px", width: "45px", objectFit: "cover", borderRadius: "50%" }}
           />
           Hotel Heaven
-        </a>
+        </Link>
 
         {/* Mobile Menu Button */}
         <button
@@ -62,9 +57,9 @@ function Navbar() {
 
             {/* Home */}
             <li className="nav-item">
-              <a className="nav-link" href="#home">
+              <Link className="nav-link" to="/home">
                 Home
-              </a>
+              </Link>
             </li>
 
             <li className="nav-item">
@@ -103,9 +98,9 @@ function Navbar() {
 
             {/* Contact */}
             <li className="nav-item">
-              <a className="nav-link" href="#contact">
+              <Link className="nav-link" to="/home#contact">
                 Contact
-              </a>
+              </Link>
             </li>
 
             {/* User Avatar / Logout Dropdown */}
