@@ -78,7 +78,7 @@ function Login() {
         .then((data) => console.log("Email response:", data))
         .catch((err) => console.error("Email sending error:", err));
 
-      navigate("/");
+      navigate("home");
     } catch (error) {
       console.error("Login failed:", error);
 
