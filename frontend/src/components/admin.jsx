@@ -39,6 +39,23 @@ const CATEGORIES = [
   { key: "parking", label: "Parking", color: "#43a047" },
 ];
 
+// Booking types that go through the admin approval flow (Food is instant-confirm)
+const APPROVAL_REQUIRED_TYPES = ["room", "hall", "parking"];
+
+// ---------- Booking status badges (admin approval flow) ----------
+const STATUS_BADGES = {
+  pending: { text: "Pending Review", className: "bg-warning text-dark" },
+  awaiting_payment: { text: "Awaiting Payment", className: "bg-info text-dark" },
+  confirmed: { text: "Confirmed", className: "bg-success" },
+  rejected: { text: "Rejected", className: "bg-secondary" },
+};
+
+function StatusBadge({ status }) {
+  if (!status) return <span className="text-muted">-</span>;
+  const info = STATUS_BADGES[status] || { text: status, className: "bg-secondary" };
+  return <span className={`badge ${info.className}`}>{info.text}</span>;
+}
+
 // ---------- Custom plugin: bubble kulla ₹ amount ezhuthum (monthly bubble chart) ----------
 const bubbleLabelPlugin = {
   id: "bubbleLabels",
@@ -184,6 +201,8 @@ function groupByOrderId(bookings) {
   );
 }
 
+const API_BASE = "https://hotelheaven.onrender.com";
+
 function Admin() {
   const [password, setPassword] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
@@ -205,6 +224,10 @@ function Admin() {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsRange, setAnalyticsRange] = useState("monthly");
   const [selectedWeek, setSelectedWeek] = useState(null); // null = latest week
+
+  // ---------- Approve / Reject a pending room/hall/parking booking ----------
+  const [actionId, setActionId] = useState(null); // booking._id currently being approved/rejected
+  const [actionError, setActionError] = useState("");
 
   const ADMIN_PASSWORD = "admin123";
 
@@ -232,7 +255,7 @@ function Admin() {
     setSearchedText(text);
     try {
       const res = await fetch(
-        `https://hotelheaven.onrender.com/api/bookings?orderId=${encodeURIComponent(text)}`
+        `${API_BASE}/api/bookings?orderId=${encodeURIComponent(text)}`
       );
       const data = await res.json();
       setSearchResults(Array.isArray(data) ? data : []);
@@ -250,28 +273,28 @@ function Admin() {
     setSearchResults(null);
   };
 
+  const fetchBookings = async () => {
+    setLoading(true);
+    try {
+      const url =
+        filter === "all"
+          ? `${API_BASE}/api/bookings`
+          : `${API_BASE}/api/bookings?type=${filter}`;
+
+      const res = await fetch(url);
+      const data = await res.json();
+      setBookings(data);
+    } catch (err) {
+      console.error("Failed to fetch bookings:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!authenticated || view !== "bookings") return;
-
-    const fetchBookings = async () => {
-      setLoading(true);
-      try {
-        const url =
-          filter === "all"
-            ? "https://hotelheaven.onrender.com/api/bookings"
-            : `https://hotelheaven.onrender.com/api/bookings?type=${filter}`;
-
-        const res = await fetch(url);
-        const data = await res.json();
-        setBookings(data);
-      } catch (err) {
-        console.error("Failed to fetch bookings:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchBookings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated, filter, view]);
 
   useEffect(() => {
@@ -280,7 +303,7 @@ function Admin() {
     const fetchAnalytics = async () => {
       setAnalyticsLoading(true);
       try {
-        const base = `https://hotelheaven.onrender.com/api/analytics?range=${analyticsRange}`;
+        const base = `${API_BASE}/api/analytics?range=${analyticsRange}`;
 
         // 1 call for the overall period list (chronological order) + 1 call per category
         const responses = await Promise.all([
@@ -314,6 +337,69 @@ function Admin() {
 
     fetchAnalytics();
   }, [authenticated, view, analyticsRange]);
+
+  // ---------- Approve / Reject actions ----------
+  // These call the backend routes that exist in app.py:
+  //   POST /api/booking/approve/<id>
+  //   POST /api/booking/reject/<id>
+  async function handleApprove(bookingId) {
+    setActionId(bookingId);
+    setActionError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/booking/approve/${bookingId}`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Approve failed");
+      await fetchBookings();
+    } catch (err) {
+      setActionError(err.message || "Could not approve this booking.");
+    } finally {
+      setActionId(null);
+    }
+  }
+
+  async function handleReject(bookingId) {
+    setActionId(bookingId);
+    setActionError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/booking/reject/${bookingId}`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Reject failed");
+      await fetchBookings();
+    } catch (err) {
+      setActionError(err.message || "Could not reject this booking.");
+    } finally {
+      setActionId(null);
+    }
+  }
+
+  // Small reusable Approve/Reject buttons, used in every table (room/hall/parking)
+  function ApproveRejectButtons({ booking }) {
+    if (booking.status !== "pending") {
+      return <span className="text-muted">-</span>;
+    }
+    return (
+      <div className="d-flex gap-2">
+        <button
+          className="btn btn-sm btn-success"
+          disabled={actionId === booking._id}
+          onClick={() => handleApprove(booking._id)}
+        >
+          Approve
+        </button>
+        <button
+          className="btn btn-sm btn-outline-danger"
+          disabled={actionId === booking._id}
+          onClick={() => handleReject(booking._id)}
+        >
+          Reject
+        </button>
+      </div>
+    );
+  }
 
   if (!authenticated) {
     return (
@@ -586,6 +672,12 @@ function Admin() {
 
       {view === "bookings" && (
         <>
+          {actionError && (
+            <div className="alert alert-danger" role="alert">
+              {actionError}
+            </div>
+          )}
+
           {/* ---------- Search Order ID ---------- */}
           <form
             onSubmit={handleSearch}
@@ -661,6 +753,7 @@ function Admin() {
                                 <th>Item</th>
                                 <th>Details</th>
                                 <th>Price</th>
+                                <th>Status</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -694,6 +787,13 @@ function Admin() {
                                       )}
                                     </td>
                                     <td>₹{b.price}</td>
+                                    <td>
+                                      {APPROVAL_REQUIRED_TYPES.includes(b.type) ? (
+                                        <StatusBadge status={b.status} />
+                                      ) : (
+                                        <span className="text-muted">-</span>
+                                      )}
+                                    </td>
                                   </tr>
                                 );
                               })}
@@ -800,6 +900,11 @@ function Admin() {
                                           : ""}
                                         {" — ₹"}
                                         {item.price}
+                                        {APPROVAL_REQUIRED_TYPES.includes(item.type) && (
+                                          <span className="ms-2">
+                                            <StatusBadge status={item.status} />
+                                          </span>
+                                        )}
                                         {timings && timings.checkIn !== "-" && (
                                           <div
                                             className="text-muted"
@@ -827,7 +932,7 @@ function Admin() {
                                       {p.details?.days || 1} day
                                       {(p.details?.days || 1) > 1 ? "s" : ""}
                                       {" (₹"}
-                                      {p.price})
+                                      {p.price}) <StatusBadge status={p.status} />
                                     </li>
                                   ))}
                                 </ul>
@@ -841,7 +946,9 @@ function Admin() {
                 </div>
               )}
 
-              {!loading && filter !== "all" && bookings.length > 0 && (
+              {/* Room / Hall / Parking: same columns, all get Status + Approve/Reject.
+                  Room additionally shows Check-in/Checkout timings. */}
+              {!loading && APPROVAL_REQUIRED_TYPES.includes(filter) && bookings.length > 0 && (
                 <div className="table-responsive">
                   <table className="table table-striped table-bordered">
                     <thead className="table-dark">
@@ -850,19 +957,19 @@ function Admin() {
                         <th>Type</th>
                         <th>Item</th>
                         <th>Room Number</th>
-                        <th>Table Number</th>
                         <th>Customer</th>
                         <th>Email</th>
                         <th>Phone</th>
                         <th>Address</th>
-                        {filter === "room" ? (
+                        {filter === "room" && (
                           <>
                             <th>Check-in</th>
                             <th>Checkout</th>
                           </>
-                        ) : (
-                          <th>Booking Date</th>
                         )}
+                        <th>Payment Method</th>
+                        <th>Status</th>
+                        <th>Action</th>
                         <th>Price</th>
                         <th>Booked On</th>
                       </tr>
@@ -879,24 +986,70 @@ function Admin() {
                             <td style={{ textTransform: "capitalize" }}>{b.type}</td>
                             <td>{b.itemName}</td>
                             <td>{b.details?.roomNumber || "-"}</td>
-                            <td>{b.details?.tableNumber || "-"}</td>
                             <td>{b.userName}</td>
                             <td>{b.userEmail}</td>
                             <td>{b.details?.phone || "-"}</td>
                             <td>{b.details?.address || "-"}</td>
-                            {filter === "room" ? (
+                            {filter === "room" && (
                               <>
                                 <td>{timings.checkIn}</td>
                                 <td>{timings.checkout}</td>
                               </>
-                            ) : (
-                              <td>{b.details?.bookingDate || "-"}</td>
                             )}
+                            <td>{b.paymentMethod || "-"}</td>
+                            <td>
+                              <StatusBadge status={b.status} />
+                            </td>
+                            <td>
+                              <ApproveRejectButtons booking={b} />
+                            </td>
                             <td>{b.price}</td>
                             <td>{new Date(b.createdAt).toLocaleString()}</td>
                           </tr>
                         );
                       })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Food: unchanged, no approval flow */}
+              {!loading && filter === "food" && bookings.length > 0 && (
+                <div className="table-responsive">
+                  <table className="table table-striped table-bordered">
+                    <thead className="table-dark">
+                      <tr>
+                        <th>Order ID</th>
+                        <th>Type</th>
+                        <th>Item</th>
+                        <th>Table Number</th>
+                        <th>Customer</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Address</th>
+                        <th>Booking Date</th>
+                        <th>Price</th>
+                        <th>Booked On</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bookings.map((b) => (
+                        <tr key={b._id}>
+                          <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
+                            {b.orderId || "-"}
+                          </td>
+                          <td style={{ textTransform: "capitalize" }}>{b.type}</td>
+                          <td>{b.itemName}</td>
+                          <td>{b.details?.tableNumber || "-"}</td>
+                          <td>{b.userName}</td>
+                          <td>{b.userEmail}</td>
+                          <td>{b.details?.phone || "-"}</td>
+                          <td>{b.details?.address || "-"}</td>
+                          <td>{b.details?.bookingDate || "-"}</td>
+                          <td>{b.price}</td>
+                          <td>{new Date(b.createdAt).toLocaleString()}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

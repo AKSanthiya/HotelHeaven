@@ -15,6 +15,7 @@ import Parking from "./components/parking";
 import ParkingCheckout from "./components/parkingcheckout";
 import Chatbot from "./components/Chatbot";
 
+
 function AppContent() {
   const location = useLocation();
   const hideChrome = location.pathname === "/";
@@ -37,6 +38,7 @@ function AppContent() {
         <Route path="/hall-checkout" element={<HallCheckout />} />
         <Route path="/parking" element={<Parking />} />
         <Route path="/parking-checkout" element={<ParkingCheckout />} />
+        
       </Routes>
 
       {!hideChrome && <Chatbot />}

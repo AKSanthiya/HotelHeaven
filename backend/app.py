@@ -34,6 +34,10 @@ LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "
 
 EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
 
+# The live site URL - used inside emails so customers can click through
+# to Booking History to complete payment after admin approves.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://hotel-heaven.netlify.app")
+
 # ---------- Brevo Setup (HTTP API - works on Render free plan, unlike SMTP) ----------
 BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 
@@ -54,6 +58,10 @@ mongo = PyMongo(app)
 bookings_collection = mongo.db.bookings
 vouchers_collection = mongo.db.vouchers          # stores issued vouchers per customer
 voucher_cycles_collection = mongo.db.voucher_cycles  # stores each customer's current cycle "baseline"
+
+# Booking types that go through the admin approval + payment flow.
+# Food stays as instant-confirm (no approval, no separate payment step here).
+APPROVAL_REQUIRED_TYPES = ("room", "hall", "parking")
 
 
 # ---------- Reusable Email Helper ----------
@@ -294,6 +302,7 @@ Hotel Heaven Team
 # ---------- Booking Email Templates ----------
 def build_booking_email(booking):
     """Builds a subject + body based on booking type (food / hall / room / parking).
+    Used for the FINAL confirmed-and-paid email.
     Parking bookings that are linked to a room booking (details.linkedRoomNumber
     present) get a combined "Room + Parking" confirmation email instead of a
     parking-only one."""
@@ -339,6 +348,8 @@ def build_booking_email(booking):
         extra_lines += f"Parking Rate    : Rs.{details.get('ratePerDay')} / day\n"
     if details.get("days") and b_type == "parking":
         extra_lines += f"Parking Days    : {details.get('days')}\n"
+    if booking.get("paymentMethod"):
+        extra_lines += f"Payment Method  : {booking.get('paymentMethod')}\n"
 
     if is_combined_room_parking:
         body = f"""Hi {user_name},
@@ -363,6 +374,80 @@ Item            : {item_name}
 {extra_lines}Price           : {price}
 
 We look forward to serving you.
+
+Warm regards,
+Hotel Heaven Team
+"""
+    return subject, body
+
+
+def build_pending_email(booking):
+    """Sent the moment a room/hall/parking booking is placed (before admin
+    approval). No payment has happened yet at this point."""
+    b_type = booking.get("type", "")
+    item_name = booking.get("itemName", "")
+    user_name = booking.get("userName", "Guest")
+
+    subject = "We've received your booking request - Hotel Heaven"
+    body = f"""Hi {user_name},
+
+Thank you for booking with Hotel Heaven! Here are your request details:
+
+Booking Type    : {b_type.capitalize()}
+Item            : {item_name}
+
+Your booking is currently under review. Once our admin confirms it, we
+will send you another email with a link to complete your payment
+(Online / QR / Cash on Delivery).
+
+Warm regards,
+Hotel Heaven Team
+"""
+    return subject, body
+
+
+def build_approved_email(booking):
+    """Sent when admin approves a pending room/hall/parking booking."""
+    b_type = booking.get("type", "")
+    item_name = booking.get("itemName", "")
+    user_name = booking.get("userName", "Guest")
+    history_link = f"{FRONTEND_URL}/booking-history"
+
+    subject = "Your Booking is Confirmed - Please Complete Payment"
+    body = f"""Hi {user_name},
+
+Good news! Your booking request has been confirmed by our admin:
+
+Booking Type    : {b_type.capitalize()}
+Item            : {item_name}
+
+Please proceed to complete your payment (Online / QR / Cash on Delivery)
+by visiting your Booking History page:
+{history_link}
+
+Warm regards,
+Hotel Heaven Team
+"""
+    return subject, body
+
+
+def build_rejected_email(booking):
+    """Sent when admin rejects a pending room/hall/parking booking."""
+    b_type = booking.get("type", "")
+    item_name = booking.get("itemName", "")
+    user_name = booking.get("userName", "Guest")
+
+    subject = "Update on Your Booking Request - Hotel Heaven"
+    body = f"""Hi {user_name},
+
+We're sorry to inform you that we're unable to confirm your recent
+booking request:
+
+Booking Type    : {b_type.capitalize()}
+Item            : {item_name}
+
+Please feel free to try booking a different room/hall/slot, or contact
+our front desk for assistance.
 
 Warm regards,
 Hotel Heaven Team
@@ -553,6 +638,9 @@ def release_expired_rooms():
 
 # ---------- Booking Routes ----------
 # type: "room" | "hall" | "parking" | "food"
+# status flow for room/hall/parking: pending -> awaiting_payment -> confirmed
+#                                     pending -> rejected
+# status for food: always "confirmed" directly (no approval step)
 
 @app.route('/api/book', methods=['POST'])
 def create_booking():
@@ -563,12 +651,13 @@ def create_booking():
         if field not in data:
             return jsonify({"error": f"{field} is required"}), 400
 
+    booking_type = data.get("type")
     created_at = datetime.utcnow()
     details = data.get("details", {}) or {}
 
     # For room bookings, calculate the checkout time from the customer's
     # chosen check-in date+time (bookingDate field) + number of days.
-    if data.get("type") == "room":
+    if booking_type == "room":
         days = details.get("days", 1) or 1
         try:
             days = int(days)
@@ -590,8 +679,11 @@ def create_booking():
         details["checkInTime"] = check_in_datetime.isoformat() + "Z"
         details["checkoutTime"] = checkout_datetime.isoformat() + "Z"
 
+    # Room/Hall/Parking need admin approval first; Food is instant-confirm.
+    initial_status = "pending" if booking_type in APPROVAL_REQUIRED_TYPES else "confirmed"
+
     booking = {
-        "type": data.get("type"),          # room / hall / parking / food
+        "type": booking_type,              # room / hall / parking / food
         "itemName": data.get("itemName"),  # e.g. "Standard Room 102"
         "userName": data.get("userName", "Guest"),
         "userEmail": data.get("userEmail", ""),
@@ -600,7 +692,8 @@ def create_booking():
         # Admin la "Search Order ID" ku idhu dhaan use aagum.
         "orderId": data.get("orderId") or details.get("orderId") or "",
         "details": details,  # any extra info (dates, qty, checkoutTime, slot, vehicleType etc.)
-        "status": "confirmed",
+        "status": initial_status,
+        "paymentMethod": None if booking_type in APPROVAL_REQUIRED_TYPES else "Online",
         "checkoutReminderSent": False,   # used by the reminder scheduler below
         "roomReleased": False,           # room bookings: checkout mudinja aprm True aagum (auto-release)
         "createdAt": created_at.isoformat() + "Z"
@@ -609,24 +702,150 @@ def create_booking():
     result = bookings_collection.insert_one(booking)
     booking["_id"] = str(result.inserted_id)
 
-    # Send confirmation email (booking still succeeds even if email fails)
+    email_sent = False
+    voucher_issued = None
+
+    if booking_type in APPROVAL_REQUIRED_TYPES:
+        # Just a "we received your request" email - no payment/voucher yet,
+        # those happen later once admin approves and payment is made.
+        if booking.get("userEmail"):
+            subject, body = build_pending_email(booking)
+            email_sent = send_email(booking["userEmail"], subject, body)
+    else:
+        # Food: unchanged behaviour - confirm immediately, send confirmation,
+        # and check for a voucher right away.
+        if booking.get("userEmail"):
+            subject, body = build_booking_email(booking)
+            email_sent = send_email(booking["userEmail"], subject, body)
+        if booking.get("userEmail"):
+            voucher_issued = check_and_issue_voucher(booking["userEmail"], booking.get("userName", "Guest"))
+
+    return jsonify({
+        "message": "Booking request received!" if booking_type in APPROVAL_REQUIRED_TYPES else "Booking successful!",
+        "booking": booking,
+        "emailSent": email_sent,
+        "voucherIssued": voucher_issued
+    }), 201
+
+
+@app.route('/api/booking/approve/<booking_id>', methods=['POST'])
+def approve_booking(booking_id):
+    """Admin clicks Approve on a pending room/hall/parking booking.
+    Moves it to 'awaiting_payment' and emails the customer a link to
+    Booking History to complete payment."""
+    try:
+        booking = bookings_collection.find_one({"_id": ObjectId(booking_id)})
+    except Exception:
+        return jsonify({"error": "Invalid booking id"}), 400
+
+    if not booking:
+        return jsonify({"error": "Booking not found"}), 404
+    if booking.get("status") != "pending":
+        return jsonify({"error": f"Booking is not pending (current status: {booking.get('status')})"}), 400
+
+    bookings_collection.update_one(
+        {"_id": booking["_id"]},
+        {"$set": {"status": "awaiting_payment"}}
+    )
+    booking["status"] = "awaiting_payment"
+
+    email_sent = False
+    if booking.get("userEmail"):
+        subject, body = build_approved_email(booking)
+        email_sent = send_email(booking["userEmail"], subject, body)
+
+    return jsonify({"message": "Booking approved", "emailSent": email_sent}), 200
+
+
+@app.route('/api/booking/reject/<booking_id>', methods=['POST'])
+def reject_booking(booking_id):
+    """Admin clicks Reject on a pending room/hall/parking booking."""
+    try:
+        booking = bookings_collection.find_one({"_id": ObjectId(booking_id)})
+    except Exception:
+        return jsonify({"error": "Invalid booking id"}), 400
+
+    if not booking:
+        return jsonify({"error": "Booking not found"}), 404
+    if booking.get("status") != "pending":
+        return jsonify({"error": f"Booking is not pending (current status: {booking.get('status')})"}), 400
+
+    bookings_collection.update_one(
+        {"_id": booking["_id"]},
+        {"$set": {"status": "rejected"}}
+    )
+    booking["status"] = "rejected"
+
+    email_sent = False
+    if booking.get("userEmail"):
+        subject, body = build_rejected_email(booking)
+        email_sent = send_email(booking["userEmail"], subject, body)
+
+    return jsonify({"message": "Booking rejected", "emailSent": email_sent}), 200
+
+
+@app.route('/api/booking/mark-paid/<booking_id>', methods=['POST'])
+def mark_booking_paid(booking_id):
+    """Customer completes payment (Online / QR / Cash on Delivery) from the
+    Booking History page. Body: { "paymentMethod": "Online" | "QR" | "Cash on Delivery" }
+    Moves booking from 'awaiting_payment' to 'confirmed', sends the final
+    confirmation email, and (for room type) checks for a voucher unlock."""
+    data = request.get_json() or {}
+    payment_method = data.get("paymentMethod")
+
+    if payment_method not in ("Online", "QR", "Cash on Delivery"):
+        return jsonify({"error": "paymentMethod must be Online, QR, or Cash on Delivery"}), 400
+
+    try:
+        booking = bookings_collection.find_one({"_id": ObjectId(booking_id)})
+    except Exception:
+        return jsonify({"error": "Invalid booking id"}), 400
+
+    if not booking:
+        return jsonify({"error": "Booking not found"}), 404
+    if booking.get("status") != "awaiting_payment":
+        return jsonify({"error": f"Booking is not awaiting payment (current status: {booking.get('status')})"}), 400
+
+    bookings_collection.update_one(
+        {"_id": booking["_id"]},
+        {"$set": {"status": "confirmed", "paymentMethod": payment_method}}
+    )
+    booking["status"] = "confirmed"
+    booking["paymentMethod"] = payment_method
+
     email_sent = False
     if booking.get("userEmail"):
         subject, body = build_booking_email(booking)
         email_sent = send_email(booking["userEmail"], subject, body)
 
-    # After a room/food booking, check if this customer just crossed
-    # a voucher threshold (within their current cycle), and issue one if so.
     voucher_issued = None
-    if booking.get("userEmail") and data.get("type") in ("room", "food"):
+    if booking.get("userEmail") and booking.get("type") == "room":
         voucher_issued = check_and_issue_voucher(booking["userEmail"], booking.get("userName", "Guest"))
 
     return jsonify({
-        "message": "Booking successful!",
-        "booking": booking,
+        "message": "Payment recorded, booking confirmed!",
         "emailSent": email_sent,
-        "voucherIssued": voucher_issued   # None, or the new voucher dict if one was just unlocked
-    }), 201
+        "voucherIssued": voucher_issued
+    }), 200
+
+
+@app.route('/api/user-bookings/<path:email>', methods=['GET'])
+def get_user_bookings(email):
+    """Booking History page (customer-side) calls this with their own email
+    to list all their bookings with status, date, item, price etc."""
+    bookings = list(bookings_collection.find({"userEmail": email}).sort("createdAt", -1))
+    for b in bookings:
+        b["_id"] = str(b["_id"])
+    return jsonify(bookings), 200
+
+
+@app.route('/api/bookings/pending', methods=['GET'])
+def get_pending_bookings():
+    """Admin dashboard - list of room/hall/parking bookings awaiting approval."""
+    bookings = list(bookings_collection.find({"status": "pending"}).sort("createdAt", -1))
+    for b in bookings:
+        b["_id"] = str(b["_id"])
+    return jsonify(bookings), 200
 
 
 @app.route('/api/bookings', methods=['GET'])
@@ -653,12 +872,18 @@ def get_all_bookings():
 @app.route('/api/booked-rooms', methods=['GET'])
 def get_booked_rooms():
     """Returns just the itemName list of CURRENTLY booked rooms, so Room page can mark them as Booked.
+    A room counts as booked while it's pending / awaiting_payment / confirmed - only
+    'rejected' or checkout-released rooms are free again.
     Checkout time mudinja rooms ah first release pannitu, apram thaan list tharum -
     so scheduler-ku wait pannaama udane free aagum."""
     release_expired_rooms()
 
     rooms = bookings_collection.find(
-        {"type": "room", "roomReleased": {"$ne": True}},
+        {
+            "type": "room",
+            "roomReleased": {"$ne": True},
+            "status": {"$ne": "rejected"}
+        },
         {"itemName": 1}
     )
     booked_names = [r["itemName"] for r in rooms]
@@ -667,8 +892,12 @@ def get_booked_rooms():
 
 @app.route('/api/booked-halls', methods=['GET'])
 def get_booked_halls():
-    """Returns itemName list of booked halls, so Hall page can mark them as Booked"""
-    halls = bookings_collection.find({"type": "hall"}, {"itemName": 1})
+    """Returns itemName list of booked halls, so Hall page can mark them as Booked.
+    A hall counts as booked unless its booking was rejected."""
+    halls = bookings_collection.find(
+        {"type": "hall", "status": {"$ne": "rejected"}},
+        {"itemName": 1}
+    )
     booked_names = [h["itemName"] for h in halls]
     return jsonify(booked_names), 200
 
@@ -676,8 +905,12 @@ def get_booked_halls():
 @app.route('/api/booked-parking', methods=['GET'])
 def get_booked_parking():
     """Returns list of slot codes (e.g. B1, C5, O10) that are already booked,
-    so Parking page can mark them Red (booked) vs Green (available)."""
-    parking_bookings = bookings_collection.find({"type": "parking"}, {"details.slot": 1})
+    so Parking page can mark them Red (booked) vs Green (available).
+    A slot counts as booked unless its booking was rejected."""
+    parking_bookings = bookings_collection.find(
+        {"type": "parking", "status": {"$ne": "rejected"}},
+        {"details.slot": 1}
+    )
     booked_slots = []
     for b in parking_bookings:
         slot = b.get("details", {}).get("slot")
@@ -719,11 +952,12 @@ def parse_price_to_number(price_value):
 
 
 def calculate_purchase_total(email):
-    """Sums price of this customer's room + food bookings only (not hall/parking).
-    This is the LIFETIME total, never resets."""
+    """Sums price of this customer's room + food bookings only (not hall/parking),
+    and only bookings that are actually confirmed (paid). This is the
+    LIFETIME total, never resets."""
     total = 0.0
     cursor = bookings_collection.find(
-        {"userEmail": email, "type": {"$in": ["room", "food"]}},
+        {"userEmail": email, "type": {"$in": ["room", "food"]}, "status": "confirmed"},
         {"price": 1}
     )
     for b in cursor:
@@ -748,7 +982,7 @@ def set_cycle_baseline(email, new_baseline):
 
 def check_and_issue_voucher(email, user_name="Guest"):
     """
-    Call this right after a room or food booking is created.
+    Call this right after a room or food booking is CONFIRMED (paid).
     Checks (total_purchase - current cycle baseline) against the thresholds;
     if the customer crossed one they haven't claimed yet THIS CYCLE, issues a voucher.
     Returns the new voucher dict if one was issued, else None.
@@ -955,9 +1189,11 @@ def get_analytics():
 # ---------- AI Chatbot ----------
 
 HOTEL_CONTEXT = """
-Nee "Hotel Heaven" hotel-oda friendly AI assistant. Customer kேட்கும் questions ku,
-kீzhа irukura hotel details vечhu mattum answer pannu. Chinna-ah, friendly-ah,
-2-4 lines-la reply pannu. Theriyaadha kேள்வி na, "Please contact our front desk for more details" nu solu.
+You are the friendly AI assistant for "Hotel Heaven". Answer customer questions
+using only the hotel details given below. Keep replies short, friendly, and
+2-4 lines long. If asked for an exact price, give the exact amount from the
+list below - never give only a range when an exact item is named. If you
+don't know the answer, say "Please contact our front desk for more details."
 
 ===== ROOMS (per night) =====
 - Standard - Rs.2000 (AC, TV, Wi-Fi, Queen Bed, Bathroom) - Rooms: 101-108
@@ -966,22 +1202,109 @@ kீzhа irukura hotel details vечhu mattum answer pannu. Chinna-ah, friendly-
 - Family - Rs.4200 (AC, Smart TV, 1 King + 2 Single Beds, Large Space) - Rooms: 401-402
 - Executive Suite - Rs.5000 (AC, Smart TV, King Bed, Sofa, Separate Living Room) - Rooms: 501-502
 - Luxury Suite - Rs.7000 (AC, Smart TV, King Bed, Balcony, Bathtub, Living Room) - Room: 601
-- Check-in: Anytime you arrive (no fixed clock time) | Check-out: Exactly N days after your booking time (e.g. booked 3 PM for 1 day → checkout by next day 3 PM). A reminder email is auto-sent 1 hour before checkout.
+- Check-in: Anytime you arrive (no fixed clock time) | Check-out: Exactly N days after your booking time. A reminder email is auto-sent 1 hour before checkout.
 
 ===== HALLS (per event) =====
-- Conference Hall - Rs.20,000 - Capacity 100 guests - for meetings, seminars, workshops
-- Royal Party Hall - Rs.40,000 - Capacity 80-120 guests - for birthdays, anniversaries, get-togethers
-- Grand Celebration Hall - Rs.75,000 - Capacity 200-250 guests - for weddings, receptions, cultural events
+- Conference Hall - Rs.20,000 - Capacity 100 guests - meetings, seminars, workshops
+- Royal Party Hall - Rs.40,000 - Capacity 80-120 guests - birthdays, anniversaries, get-togethers
+- Grand Celebration Hall - Rs.75,000 - Capacity 200-250 guests - weddings, receptions, cultural events
 - All halls are fully air-conditioned with sound system, seating and decoration support
 
 ===== PARKING =====
 - Rs.150 per slot, 30 total slots (10 Bike, 10 Car, 10 Other)
 
 ===== FOOD MENU =====
-Wide menu available covering South Indian (Rs.25-300), Combo Meals (Rs.200-730),
-Fast Food - pizza/burgers/pasta (Rs.70-300), Veg Specials (Rs.120-190),
-Non-Veg - Chicken/Mutton/Fish/Egg/Prawns/Crab (Rs.60-500), Desserts - cakes/pies/pastries/ice-cream (Rs.60-1150),
-Drinks (Rs.70-170). Full menu with photos is on the Food page of the website.
+
+-- South Indian --
+Idly Rs.40, Dosa Rs.60, Ghee Roast Rs.100, Pongal Rs.70, Poori Rs.60, Vada Rs.25,
+Full Meals Rs.300, Sambar Rice Rs.150, Curd Rice Rs.150, Lemon Rice Rs.150
+
+-- Combo Foods --
+Chicken Biryani Deluxe Combo Rs.430, Chicken Chinese Deluxe Combo Rs.410,
+Mutton Biryani Deluxe Combo Rs.730, Mutton Parotta Deluxe Combo Rs.350,
+Crab Fried Rice Deluxe Combo Rs.500, Crab Biryani Deluxe Combo Rs.550,
+Prawns Special Rice Combo Rs.450, Prawns Biryani Combo Rs.500,
+Egg Chinese Combo Rs.280, Egg Biryani Combo Rs.300,
+Chicken Burger Combo Rs.300, Chicken Pizza Combo Rs.400, South Indian Combo Rs.200
+
+-- Chicken --
+Chicken Biryani Rs.220, Chicken 65 Rs.200, Chicken Tikka Masala Rs.260,
+Chicken Pepper Masala Rs.230, Chicken Manchurian Rs.230,
+Chicken Fried Rice Rs.180, Chicken Noodles Rs.180
+
+-- Mutton --
+Mutton Chukka Rs.350, Mutton Pepper Fry Rs.380, Mutton Varuval Rs.350,
+Mutton Kola Urundai Rs.300, Mutton Sheekh Kebab Rs.400, Mutton Curry Rs.350,
+Mutton Chettinad Rs.380, Mutton Korma Rs.380, Mutton Liver Fry Rs.300,
+Mutton Biryani Rs.500, Ambur Mutton Biryani Rs.400, Mutton Chops Rs.400,
+Nalli Elumbu Masala Rs.500, Mutton Bone Soup Rs.150, Mutton Keema Rs.380
+
+-- Fish --
+Fish Chettinad Rs.230, Fish Coconut Curry Rs.220, Fish Butter Masala Rs.240,
+Fish Stew Rs.200, Fish Biryani Rs.280, Fish Pulao Rs.250, Fish Do Pyaza Rs.230
+
+-- Fish Fries --
+Vanjaram Fish Fry Rs.280, Pomfret Fish Fry Rs.270, Sankara Fish Fry Rs.260,
+Ayala (Mackerel) Fish Fry Rs.220, Nethili (Anchovy) Fish Fry Rs.180, Parai Fish Fry Rs.240
+
+-- Egg --
+Egg 65 Rs.120, Chilli Egg Rs.140, Egg Pakoda Rs.120, Egg Curry Rs.150,
+Egg Masala Rs.160, Egg Chettinad Rs.180, Egg Biryani Rs.180, Egg Fried Rice Rs.160,
+Egg Noodles Rs.160, Masala Omelette Rs.80, Cheese Omelette Rs.120, Kalakki Rs.60,
+Egg Podimas Rs.90, Egg Roast Rs.150
+
+-- Prawns --
+Prawns Chettinad Rs.280, Prawns Pepper Fry Rs.290, Prawns 65 Rs.260,
+Butter Garlic Prawns Rs.320, Prawns Coconut Curry Rs.280, Prawns Noodles Rs.240,
+Prawn Biryani Rs.320, Crispy Fried Prawns Rs.290, Prawns Cheese Balls Rs.220,
+Prawns Tacos Rs.250, Prawns Pizza Rs.300, Prawns Tempura Rs.300,
+Prawns Momos Rs.220, Prawns Spring Roll Rs.230, Sweet and Sour Prawns Rs.250
+
+-- Crab --
+Crab Fried Rice Rs.300, Crab Biryani Rs.360, Crab Thokku Rs.330,
+Chettinad Crab Rs.360, Crab Varuval Rs.330, Crab Curry Rs.310,
+Crab Manchurian Rs.340, Crab 65 Rs.330, Crab Masala Rs.340, Crab Soup Rs.200,
+Grilled Crab Legs Rs.430, Crisp Fried Crab Rs.360, Pepper Crab Rs.330,
+Chilli Crab Rs.340, Coconut Curry Crab Rs.330
+
+-- Fast Food --
+Veg Pizza (8 inch) Rs.200, Chicken Pizza (8 inch) Rs.300, Veg Burger Rs.90,
+Chicken Burger Rs.120, Chicken Shawarma Rs.150, Chicken Roll Rs.110,
+Veg Sandwich (2 halves) Rs.80, Chicken Sandwich (2 halves) Rs.110,
+French Fries Rs.70, Cheese Fries Rs.100, White Sauce Pasta Rs.140,
+Red Sauce Pasta Rs.130, Cheese Garlic Bread (4 pcs) Rs.120,
+Veg Momos (6 pcs) Rs.100, Chicken Momos (6 pcs) Rs.150
+
+-- Veg Specials --
+Paneer Butter Masala Rs.180, Paneer Tikka Rs.190, Mushroom Masala Rs.160,
+Mushroom Pepper Fry Rs.170, Gobi Manchurian Rs.120, Baby Corn Manchurian Rs.140,
+Veg Manchurian Rs.130, Veg Kurma Rs.130, Chilli Paneer Rs.180,
+Veg Fried Rice Rs.130, Veg Noodles Rs.130, Veg Biryani Rs.150
+
+-- Drinks --
+Badham Milk Rs.100, Rose Milk Rs.100, Fresh Lime Rs.70, Mango Juice Rs.100,
+Orange Juice Rs.100, Vanilla Milkshake Rs.170, Strawberry Milkshake Rs.170,
+Chocolate Milkshake Rs.100, Lassi Rs.100
+
+-- Desserts: Cakes (per piece / 500g / 1kg) --
+Chocolate Truffle Rs.100/550/1050, Black Forest Rs.80/500/950,
+White Forest Rs.80/500/950, Red Velvet Rs.100/600/1150,
+Sponge Cake Rs.60/400/750, Honey Cake Rs.70/450/850
+
+-- Desserts: Pies (per slice / 3 slices / whole) --
+Apple Pie Rs.100/250/550, Chocolate Pie Rs.100/280/600,
+Strawberry Pie Rs.100/250/550, Blueberry Pie Rs.120/280/600,
+Banana Cream Pie Rs.100/250/550, Lemon Pie Rs.150/220/500
+
+-- Desserts: Pastries --
+Chocolate Pastry Rs.70, Black Forest Pastry Rs.80, White Forest Pastry Rs.80,
+Red Velvet Pastry Rs.90, Strawberry Pastry Rs.80, Mango Pastry Rs.70
+
+-- Desserts: Ice Cream --
+Belgium Chocolate Rs.120, Black Currant Rs.90, Blueberry Rs.90,
+Butterscotch Rs.90, Chocolate Brownie Rs.170, Chocolate Rs.80, Coffee Rs.90,
+Oreo Rs.100, Pineapple Rs.85, Pista Rs.95, Raspberry Rs.90, Red Velvet Rs.100,
+Strawberry Rs.85, Tender Coconut Rs.120, Vanilla Rs.70
 
 ===== GENERAL =====
 - Modules available: Room Booking, Hall Booking, Food Ordering, Parking Booking
@@ -996,12 +1319,16 @@ def get_live_availability():
 
     booked_rooms = [
         b["itemName"] for b in bookings_collection.find(
-            {"type": "room", "roomReleased": {"$ne": True}}, {"itemName": 1}
+            {"type": "room", "roomReleased": {"$ne": True}, "status": {"$ne": "rejected"}}, {"itemName": 1}
         )
     ]
-    booked_halls = [b["itemName"] for b in bookings_collection.find({"type": "hall"}, {"itemName": 1})]
+    booked_halls = [
+        b["itemName"] for b in bookings_collection.find(
+            {"type": "hall", "status": {"$ne": "rejected"}}, {"itemName": 1}
+        )
+    ]
     booked_slots = []
-    for b in bookings_collection.find({"type": "parking"}, {"details.slot": 1}):
+    for b in bookings_collection.find({"type": "parking", "status": {"$ne": "rejected"}}, {"details.slot": 1}):
         slot = b.get("details", {}).get("slot")
         if slot:
             booked_slots.append(slot)
@@ -1033,7 +1360,7 @@ def chatbot():
 
     except Exception as e:
         print("Chatbot error:", e)
-        return jsonify({"reply": "Sorry, chatbot ippo konjam busy iruku. Please try again illa front desk-a contact pannunga."}), 200
+        return jsonify({"reply": "Sorry, the chatbot is a little busy right now. Please try again or contact the front desk."}), 200
 
 
 # ---------- Checkout Reminder Scheduler ----------

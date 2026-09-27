@@ -5,7 +5,6 @@ import { auth } from "../firebase";
 import "./Rooms.css";
 
 // ---------- Razorpay public Key ID (safe to expose in frontend - NOT the secret) ----------
-// Backend kudukkura keyId ye first use aagum; idhu just fallback.
 const RAZORPAY_KEY_ID = "rzp_test_TeFdyXXi625Mk3";
 
 // Nandhini QR image -> frontend/public/nandhini-qr.jpeg
@@ -155,7 +154,7 @@ function RoomCheckout() {
     city: "",
     roomNumber: cart.map((item) => item.roomNumber).join(", "),
     phone: "",
-    bookingDate: "", // now holds check-in DATE + TIME (datetime-local value)
+    bookingDate: "", // check-in DATE + TIME (datetime-local value)
   });
 
   // ---------- Check-in: date + hour + minute + AM/PM (separate boxes) ----------
@@ -166,17 +165,15 @@ function RoomCheckout() {
     ampm: "AM",
   });
 
-  // ---------- Payment method: "hotel" | "razorpay" | "qr" ----------
-  const [paymentMethod, setPaymentMethod] = React.useState("razorpay");
+  const [roomPaymentMethod, setRoomPaymentMethod] = React.useState("razorpay");
   const [roomUtr, setRoomUtr] = React.useState("");
-  const [roomQrPending, setRoomQrPending] = React.useState(false);
 
   const [orderPlaced, setOrderPlaced] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+  const [payingNow, setPayingNow] = React.useState(false);
   const [authChecked, setAuthChecked] = React.useState(false);
-  const [payingNow, setPayingNow] = React.useState(false); // Razorpay modal open aagum pothu
 
-  // ---- Parking flow states ----
+  // ---- Parking flow states (unchanged) ----
   const PARKING_RATE_PER_DAY = 150;
   const [parkingChoice, setParkingChoice] = React.useState(null); // null | "yes" | "no"
   const [parkingPaymentMethod, setParkingPaymentMethod] = React.useState("razorpay");
@@ -197,6 +194,8 @@ function RoomCheckout() {
   // Live booked-slot list, fetched from backend
   const [parkingBookedSlots, setParkingBookedSlots] = React.useState([]);
   const [parkingSlotsLoading, setParkingSlotsLoading] = React.useState(true);
+
+  const [roomQrPending, setRoomQrPending] = React.useState(false);
 
   // ---------- Lock the email to the logged-in Google account ----------
   React.useEffect(() => {
@@ -256,9 +255,8 @@ function RoomCheckout() {
     setParkingForm((prev) => ({
       ...prev,
       vehicleCategory: category,
-      // Bike/Car: vehicleType = category itself. Other: default to "Van" until user picks.
       vehicleType: category === "Other" ? "Van" : category,
-      slot: null, // category maarina, already select pannirundha slot reset pannurom
+      slot: null,
     }));
   };
 
@@ -271,28 +269,9 @@ function RoomCheckout() {
     setParkingForm((prev) => ({ ...prev, slot: slotNum }));
   };
 
-  // ---------- Send the consolidated PDF bill email ----------
-  // includeParking = true -> room + parking dhaan onnu serthu oru bill;
-  // false -> room mattum (parking vendam nu customer sonna pothu)
-  const sendBillEmail = async (includeParking, paymentLabel) => {
+  // ---------- Send the PDF bill email for the ROOM booking ----------
+  const sendRoomBillEmail = async (paymentLabel) => {
     try {
-      const cartItems = cart.map((item) => ({
-        name: `${item.roomType} - Room ${item.roomNumber}`,
-        price: item.price,
-        quantity: 1,
-      }));
-
-      let billTotal = total;
-
-      if (includeParking) {
-        cartItems.push({
-          name: `Parking Slot ${parkingForm.slot} (${parkingForm.vehicleType} - ${parkingForm.vehicleNumber})`,
-          price: parkingTotal,
-          quantity: 1,
-        });
-        billTotal += parkingTotal;
-      }
-
       await fetch("https://hotelheaven.onrender.com/api/send-bill-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -305,22 +284,58 @@ function RoomCheckout() {
             address: form.address,
             city: form.city,
           },
-          cartItems,
-          total: billTotal,
-          finalAmount: billTotal,
+          cartItems: cart.map((item) => ({
+            name: `${item.roomType} - Room ${item.roomNumber}`,
+            price: item.price,
+            quantity: 1,
+          })),
+          total,
+          finalAmount: total,
           paymentMethod: paymentLabel,
           orderId: `ROOM-${Date.now()}`,
           orderTime: new Date().toLocaleString(),
         }),
       });
     } catch (err) {
-      // Bill email fail aana kooda booking already save aayiduchu, so just log pannurom
       console.error("Bill email failed:", err);
     }
   };
 
-  // ---------- Actually save the ROOM booking to MongoDB ----------
-  // paymentStatus: "Paid" (Razorpay) | "Pending Verification" (QR) | "Pay at Hotel"
+  // ---------- Send the PDF bill email for the PARKING booking ----------
+  const sendParkingBillEmail = async (paymentLabel) => {
+    try {
+      await fetch("https://hotelheaven.onrender.com/api/send-bill-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: auth.currentUser.email,
+          customer: {
+            name: parkingForm.name,
+            email: auth.currentUser.email,
+            phone: form.phone,
+            address: form.address,
+            city: form.city,
+          },
+          cartItems: [
+            {
+              name: `Parking Slot ${parkingForm.slot} (${parkingForm.vehicleType} - ${parkingForm.vehicleNumber})`,
+              price: parkingTotal,
+              quantity: 1,
+            },
+          ],
+          total: parkingTotal,
+          finalAmount: parkingTotal,
+          paymentMethod: paymentLabel,
+          orderId: `PARKING-${Date.now()}`,
+          orderTime: new Date().toLocaleString(),
+        }),
+      });
+    } catch (err) {
+      console.error("Bill email failed:", err);
+    }
+  };
+
+  // ---------- Actually save the ROOM booking to MongoDB (confirmed immediately) ----------
   const placeRoomBooking = async (paidNowLabel, paymentStatus, utr = "") => {
     setSubmitting(true);
     try {
@@ -354,11 +369,6 @@ function RoomCheckout() {
         )
       );
 
-      // Bill email only when payment is actually completed online
-      if (paymentStatus === "Paid") {
-        sendBillEmail(false, paidNowLabel);
-      }
-
       setRoomQrPending(paymentStatus === "Pending Verification");
 
       // Parking form la name/email room form la irundhu pre-fill pannurom
@@ -368,6 +378,7 @@ function RoomCheckout() {
         email: loggedInEmail,
       }));
 
+      sendRoomBillEmail(paidNowLabel);
       setOrderPlaced(true);
     } catch (err) {
       console.error("Booking save failed:", err);
@@ -409,8 +420,7 @@ function RoomCheckout() {
       setParkingQrPending(paymentStatus === "Pending Verification");
       setParkingBooked(true);
 
-      // Room + Parking serthu oru consolidated bill email anupurom
-      sendBillEmail(true, paidNowLabel);
+      sendParkingBillEmail(paidNowLabel);
     } catch (err) {
       console.error("Parking booking save failed:", err);
       alert("Parking Booking could not be saved. Please check wheather the backend server is running...");
@@ -420,7 +430,7 @@ function RoomCheckout() {
   };
 
   // ============================================================
-  // ---------- RAZORPAY PAYMENT FLOW (shared helper) ----------
+  // ---------- RAZORPAY PAYMENT FLOW (used by ROOM and PARKING) ----------
   // amount = rupees (not paise); onSuccess(paymentId) called after
   // backend verifies the payment signature.
   // ============================================================
@@ -484,7 +494,6 @@ function RoomCheckout() {
           }
         },
         modal: {
-          // User checkout popup ah close pannitanunu, busy state reset pannurom
           ondismiss: function () {
             setBusy(false);
           },
@@ -506,6 +515,7 @@ function RoomCheckout() {
     }
   };
 
+  // ---------- Room booking submit: collects payment method, then books ----------
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -546,18 +556,15 @@ function RoomCheckout() {
       return;
     }
 
-    if (paymentMethod === "hotel") {
-      // No payment now - pay at reception during check-in
+    if (roomPaymentMethod === "hotel") {
       await placeRoomBooking("Pay at Hotel", "Pay at Hotel");
-    } else if (paymentMethod === "qr") {
-      // QR payment - UTR kudutha aprom booking "Pending Verification" nu save aagum
+    } else if (roomPaymentMethod === "qr") {
       if (!/^\d{12}$/.test(roomUtr)) {
         alert("Enter the 12-digit UTR / Reference No. from your UPI app 🔢");
         return;
       }
       await placeRoomBooking(`UPI QR (UTR: ${roomUtr})`, "Pending Verification", roomUtr);
     } else {
-      // Real Razorpay payment - popup open aagum, success aana booking save aagum
       startRazorpayPayment({
         amount: total,
         customerName: form.name,
@@ -618,7 +625,7 @@ function RoomCheckout() {
     }
   };
 
-  // ---------- Parking "No" - room-only bill anupitu, "no" screen ku poidalam ----------
+  // ---------- Parking "No" - "no" screen ku poidalam ----------
   const handleSkipParking = () => {
     setParkingChoice("no");
   };
@@ -639,28 +646,26 @@ function RoomCheckout() {
 
   // Final confirmation screen — room + parking (or room only if parking said No)
   if (orderPlaced === true && (parkingBooked || parkingChoice === "no")) {
-    const anyQrPending = roomQrPending || parkingQrPending;
     return (
       <div className="rooms-page-wrapper" style={{ paddingTop: "120px" }}>
         <div className="container text-center">
           <div className="card shadow p-5 mx-auto" style={{ maxWidth: "500px" }}>
-            <h2 className={`fw-bold mb-3 ${anyQrPending ? "text-warning" : "text-success"}`}>
-              {anyQrPending
-                ? "⏳ Booking Received!"
-                : `✅ ${
-                    parkingBooked
-                      ? "Thanks for booking room and parking slot!"
-                      : "Booking Confirmed!"
-                  }`}
+            <h2 className="fw-bold mb-3 text-success">
+              🎉 Booking Confirmed!
             </h2>
             <p className="fs-5">
               Thank you for booking a room with us! 🛏️
             </p>
             <p className="text-muted">
-              {form.name}, unga room check-in {formatCheckIn(form.bookingDate)} ku
-              {anyQrPending ? " book aayiduchu." : " confirm aayiduchu."} Our reception team will
-              contact you shortly.
+              {form.name}, your room ({formatCheckIn(form.bookingDate)} check-in) is
+              confirmed. A confirmation email has been sent to you.
             </p>
+
+            {roomQrPending && (
+              <div className="alert alert-warning mt-2 mb-0" style={{ fontSize: "0.9rem" }}>
+                Your room QR payment is being verified by our team.
+              </div>
+            )}
 
             {parkingBooked && (
               <p className="text-muted">
@@ -671,10 +676,9 @@ function RoomCheckout() {
               </p>
             )}
 
-            {anyQrPending && (
+            {parkingQrPending && (
               <div className="alert alert-warning mt-2 mb-0" style={{ fontSize: "0.9rem" }}>
-                Your QR payment is being verified by our team. Booking will be confirmed once
-                the payment is received.
+                Your parking QR payment is being verified by our team.
               </div>
             )}
 
@@ -852,7 +856,6 @@ function RoomCheckout() {
                 )}
               </div>
 
-              {/* ---------- PARKING PAYMENT METHOD ---------- */}
               <div className="mb-3">
                 <label className="form-label fw-semibold d-block">Payment Method</label>
                 <PaymentMethodSelector
@@ -869,7 +872,6 @@ function RoomCheckout() {
                   setUtr={setParkingUtr}
                 />
               )}
-              {/* ---------- END PARKING PAYMENT METHOD ---------- */}
 
               <div className="d-flex gap-2 mt-3">
                 <button
@@ -903,23 +905,22 @@ function RoomCheckout() {
     );
   }
 
-  // Parking prompt screen (Yes / No) — shown right after room booking success
+  // Parking prompt screen (Yes / No) — shown right after room booking is confirmed
   if (orderPlaced === true && parkingChoice === null) {
     return (
       <div className="rooms-page-wrapper" style={{ paddingTop: "120px" }}>
         <div className="container text-center">
           <div className="card shadow p-5 mx-auto" style={{ maxWidth: "500px" }}>
-            <h2 className={`fw-bold mb-3 ${roomQrPending ? "text-warning" : "text-success"}`}>
-              {roomQrPending ? "⏳ Room Booking Received!" : "✅ Room Booking Confirmed!"}
+            <h2 className="fw-bold mb-3 text-success">
+              🎉 Room Booked Successfully!
             </h2>
             <p className="fs-5">
-              {form.name}, unga room check-in {formatCheckIn(form.bookingDate)} ku
-              {roomQrPending ? " book aayiduchu. 🛏️" : " Booking confirmed successfully.  🛏️"}
+              {form.name}, your room ({formatCheckIn(form.bookingDate)} check-in) is
+              confirmed. 🛏️
             </p>
             {roomQrPending && (
               <div className="alert alert-warning" style={{ fontSize: "0.9rem" }}>
-                Your QR payment is being verified by our team. Booking will be confirmed once
-                the payment is received.
+                Your QR payment is being verified by our team.
               </div>
             )}
             <hr />
@@ -1102,20 +1103,18 @@ function RoomCheckout() {
                   />
                 </div>
 
-                {/* ---------- PAYMENT METHOD SECTION ---------- */}
                 <div className="mb-3">
                   <label className="form-label fw-semibold d-block">Payment Method</label>
                   <PaymentMethodSelector
-                    value={paymentMethod}
-                    onChange={setPaymentMethod}
-                    groupName="paymentMethod"
+                    value={roomPaymentMethod}
+                    onChange={setRoomPaymentMethod}
+                    groupName="roomPaymentMethod"
                   />
                 </div>
 
-                {paymentMethod === "qr" && (
+                {roomPaymentMethod === "qr" && (
                   <QrPaymentBox amount={total} utr={roomUtr} setUtr={setRoomUtr} />
                 )}
-                {/* ---------- END PAYMENT METHOD SECTION ---------- */}
 
                 <button
                   type="submit"
@@ -1126,9 +1125,9 @@ function RoomCheckout() {
                     ? "Opening Payment..."
                     : submitting
                     ? "Confirming..."
-                    : paymentMethod === "hotel"
+                    : roomPaymentMethod === "hotel"
                     ? "Confirm Booking (Cash at Hotel)"
-                    : paymentMethod === "qr"
+                    : roomPaymentMethod === "qr"
                     ? "Submit Payment Details"
                     : `Pay ₹${total} Online`}
                 </button>

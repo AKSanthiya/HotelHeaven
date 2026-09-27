@@ -96,6 +96,8 @@ function Navbar() {
               </Link>
             </li>
 
+            
+
             {/* Contact */}
             <li className="nav-item">
               <Link className="nav-link" to="/home#contact">
