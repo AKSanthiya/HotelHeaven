@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 
 const GREETING =
-  "Hello and welcome to Hotel Heaven! 👋\nRoom, Food, Hall, Parking pathi kேட்கலாம். எப்படி உதவலாம்?";
+  "Hello and welcome to Hotel Heaven! 👋\nYou can ask about Room, Food, Hall, or Parking. How can I help you?";
 
 const QUICK_ACTIONS = [
   "🛏️ Room Booking",
@@ -40,7 +40,7 @@ function Chatbot() {
 
       const data = await res.json();
       const botText =
-        data.reply || "Sorry, konjam problem iruku. Try again pannunga.";
+        data.reply || "Sorry, there's a small issue. Please try again.";
 
       setMessages((prev) => [...prev, { sender: "bot", text: botText }]);
     } catch (err) {
@@ -49,7 +49,7 @@ function Chatbot() {
         ...prev,
         {
           sender: "bot",
-          text: "Sorry, backend ah connect panna mudiyala. Server run aaguthaa nu check pannunga.",
+          text: "Sorry, unable to connect to the backend. Please check if the server is running.",
         },
       ]);
     } finally {
@@ -180,7 +180,7 @@ function Chatbot() {
               </div>
             ))}
 
-            {/* Quick Actions - first load la mattum kaatum */}
+            {/* Show quick actions only on first load */}
             {messages.length === 1 && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
                 {QUICK_ACTIONS.map((label, i) => (

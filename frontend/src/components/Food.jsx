@@ -564,7 +564,7 @@ function Food() {
       { id: 207, name: "Mutton Chettinad", price: 380, image: muttonChettinadImg },
       { id: 208, name: "Mutton Korma", price: 380, image: muttonKormaImg },
       { id: 209, name: "Mutton Liver Fry", price: 300, image: muttonLiverFryImg },
-      { id: 210, name: "Mutton Biryani", price: 2, image: muttonBiryaniImg },
+      { id: 210, name: "Mutton Biryani", price: 500, image: muttonBiryaniImg },
       { id: 212, name: "Ambur Mutton Biryani", price: 400, image: amburMuttonBiryaniImg },
       { id: 213, name: "Mutton Chops", price: 400, image: muttonChopsImg },
       { id: 214, name: "Nalli Elumbu Masala", price: 500, image: nalliElumbuMasalaImg },
