@@ -2,10 +2,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_pymongo import PyMongo
 from bson.objectid import ObjectId
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.application import MIMEApplication
+import requests
+import base64
 import os
 import re
 import calendar
@@ -35,7 +33,9 @@ IST_OFFSET = timedelta(hours=5, minutes=30)
 LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "hotel_logo.jpg")
 
 EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
-EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
+
+# ---------- Brevo Setup (HTTP API - works on Render free plan, unlike SMTP) ----------
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 
 # ---------- Gemini Setup ----------
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -60,6 +60,8 @@ voucher_cycles_collection = mongo.db.voucher_cycles  # stores each customer's cu
 def send_email(to_email, subject, body, attachment_bytes=None, attachment_filename=None):
     """
     Common function to send any email (welcome mail, booking confirmation, etc.)
+    Sends via the Brevo HTTP API (not SMTP), since Render's free plan
+    blocks outbound SMTP ports (25/465/587).
     Optionally attaches a PDF (attachment_bytes = raw PDF bytes, attachment_filename = e.g. "bill.pdf").
     Returns True if sent, False if failed (never raises - caller decides what to do).
     """
@@ -68,23 +70,35 @@ def send_email(to_email, subject, body, attachment_bytes=None, attachment_filena
         return False
 
     try:
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_ADDRESS
-        msg['To'] = to_email
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'plain'))
+        payload = {
+            "sender": {"name": "Hotel Heaven", "email": EMAIL_ADDRESS},
+            "to": [{"email": to_email}],
+            "subject": subject,
+            "textContent": body
+        }
 
         if attachment_bytes and attachment_filename:
-            part = MIMEApplication(attachment_bytes, _subtype="pdf")
-            part.add_header('Content-Disposition', 'attachment', filename=attachment_filename)
-            msg.attach(part)
+            payload["attachment"] = [{
+                "content": base64.b64encode(attachment_bytes).decode("utf-8"),
+                "name": attachment_filename
+            }]
 
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(EMAIL_ADDRESS, EMAIL_APP_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        return True
+        response = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            json=payload,
+            headers={
+                "api-key": BREVO_API_KEY,
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+            },
+            timeout=15
+        )
+
+        if response.status_code in (200, 201):
+            return True
+        else:
+            print("Brevo email sending failed:", response.status_code, response.text)
+            return False
 
     except Exception as e:
         print("Email sending failed:", e)
