@@ -284,6 +284,11 @@ function FoodCheckout() {
   const placeOrder = async (paymentLabel, paymentStatus, utrValue = "") => {
     setSubmitting(true);
     try {
+      // ---------- Order ID + time ippo ye create pannurom (booking save aaga munnaadi) ----------
+      // Idhe ID thaan bill la varum, adhe ID thaan Admin la kaattum.
+      const now = new Date();
+      const newOrderId = `HH-FOOD-${now.getTime()}`;
+
       // Save the booking with the ORIGINAL price (for accurate sales records),
       // but note the voucher discount and payment method in details for admin visibility.
       await Promise.all(
@@ -300,6 +305,7 @@ function FoodCheckout() {
               userEmail: auth.currentUser.email, // always the logged-in email
               price: item.finalPrice || item.price,
               details: {
+                orderId: newOrderId, // <-- Admin.jsx la b.details?.orderId nu edukalaam
                 address: form.address,
                 city: form.city,
                 phone: form.phone,
@@ -327,9 +333,7 @@ function FoodCheckout() {
         localRedeemResult = data;
       }
 
-      // Build a simple order reference + timestamp for the customer's bill
-      const now = new Date();
-      const newOrderId = `HH-FOOD-${now.getTime()}`;
+      // Bill screen ku order reference + timestamp
       setOrderId(newOrderId);
       setOrderTime(now);
       setPlacedPayment({ label: paymentLabel, status: paymentStatus });

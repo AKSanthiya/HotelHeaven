@@ -270,7 +270,8 @@ function RoomCheckout() {
   };
 
   // ---------- Send the PDF bill email for the ROOM booking ----------
-  const sendRoomBillEmail = async (paymentLabel) => {
+  // orderId = bill la varra same Order ID (booking la um save aagum)
+  const sendRoomBillEmail = async (paymentLabel, orderId) => {
     try {
       await fetch("https://hotelheaven.onrender.com/api/send-bill-email", {
         method: "POST",
@@ -292,7 +293,7 @@ function RoomCheckout() {
           total,
           finalAmount: total,
           paymentMethod: paymentLabel,
-          orderId: `ROOM-${Date.now()}`,
+          orderId: orderId,
           orderTime: new Date().toLocaleString(),
         }),
       });
@@ -302,7 +303,7 @@ function RoomCheckout() {
   };
 
   // ---------- Send the PDF bill email for the PARKING booking ----------
-  const sendParkingBillEmail = async (paymentLabel) => {
+  const sendParkingBillEmail = async (paymentLabel, orderId) => {
     try {
       await fetch("https://hotelheaven.onrender.com/api/send-bill-email", {
         method: "POST",
@@ -326,7 +327,7 @@ function RoomCheckout() {
           total: parkingTotal,
           finalAmount: parkingTotal,
           paymentMethod: paymentLabel,
-          orderId: `PARKING-${Date.now()}`,
+          orderId: orderId,
           orderTime: new Date().toLocaleString(),
         }),
       });
@@ -341,6 +342,9 @@ function RoomCheckout() {
     try {
       const loggedInEmail = auth.currentUser.email;
 
+      // Bill la varra same Order ID - booking la um save aagum, Admin la kaattum
+      const roomOrderId = `ROOM-${Date.now()}`;
+
       // Ovvoru room-um separate booking-ah backend ku anupurom
       await Promise.all(
         cart.map((item) =>
@@ -353,6 +357,7 @@ function RoomCheckout() {
               userName: form.name,
               userEmail: loggedInEmail, // always the logged-in email, not the typed one
               price: item.price,
+              orderId: roomOrderId,
               details: {
                 roomNumber: item.roomNumber,
                 address: form.address,
@@ -378,7 +383,7 @@ function RoomCheckout() {
         email: loggedInEmail,
       }));
 
-      sendRoomBillEmail(paidNowLabel);
+      sendRoomBillEmail(paidNowLabel, roomOrderId);
       setOrderPlaced(true);
     } catch (err) {
       console.error("Booking save failed:", err);
@@ -392,6 +397,9 @@ function RoomCheckout() {
   const placeParkingBooking = async (paidNowLabel, paymentStatus, utr = "") => {
     setParkingSubmitting(true);
     try {
+      // Bill la varra same Order ID - booking la um save aagum, Admin la kaattum
+      const parkingOrderId = `PARKING-${Date.now()}`;
+
       await fetch("https://hotelheaven.onrender.com/api/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -401,6 +409,7 @@ function RoomCheckout() {
           userName: parkingForm.name,
           userEmail: auth.currentUser.email, // always the logged-in email
           price: parkingTotal,
+          orderId: parkingOrderId,
           details: {
             slot: String(parkingForm.slot),
             vehicleNumber: parkingForm.vehicleNumber,
@@ -420,7 +429,7 @@ function RoomCheckout() {
       setParkingQrPending(paymentStatus === "Pending Verification");
       setParkingBooked(true);
 
-      sendParkingBillEmail(paidNowLabel);
+      sendParkingBillEmail(paidNowLabel, parkingOrderId);
     } catch (err) {
       console.error("Parking booking save failed:", err);
       alert("Parking Booking could not be saved. Please check wheather the backend server is running...");

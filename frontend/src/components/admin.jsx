@@ -125,6 +125,36 @@ function toNumber(value) {
   return isNaN(n) ? 0 : n;
 }
 
+// ---------- Order ID edukka: top-level orderId illa na details.orderId paakkum ----------
+const getOrderId = (b) => b.orderId || b.details?.orderId || "";
+
+// ---------- Payment method edukka: food la details.paymentMethod, room/hall/parking la top-level ----------
+const getPaymentMethod = (b) => b.details?.paymentMethod || b.paymentMethod || "-";
+
+// Payment method + (food na) payment status chinna ezhuthula
+function PaymentCell({ b }) {
+  const method = getPaymentMethod(b);
+  const status = b.details?.paymentStatus;
+  return (
+    <div style={{ fontSize: "0.85rem" }}>
+      <div>{method}</div>
+      {status && (
+        <span
+          className={`badge ${
+            status === "Paid"
+              ? "bg-success"
+              : status === "Pending Verification"
+              ? "bg-warning text-dark"
+              : "bg-info text-dark"
+          }`}
+        >
+          {status}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ---------- Groups bookings by customer email + the calendar day they were
 // booked on. Parking bookings are pulled OUT of the item list and folded
 // into a single "Parking" summary for that customer/day instead of getting
@@ -176,7 +206,7 @@ function groupByOrderId(bookings) {
   const groups = {};
 
   bookings.forEach((b) => {
-    const key = b.orderId || "-";
+    const key = getOrderId(b) || "-";
 
     if (!groups[key]) {
       groups[key] = {
@@ -371,6 +401,33 @@ function Admin() {
       await fetchBookings();
     } catch (err) {
       setActionError(err.message || "Could not reject this booking.");
+    } finally {
+      setActionId(null);
+    }
+  }
+
+  // ---------- Delete a booking (oru row) ----------
+  // Backend: DELETE /api/booking/<id>
+  async function handleDelete(bookingId) {
+    if (!window.confirm("Indha order ah permanent ah delete pannalaama? Idha thirumba edukka mudiyaadhu.")) {
+      return;
+    }
+    setActionId(bookingId);
+    setActionError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/booking/${bookingId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Delete failed");
+
+      // Search results la irundha, andha row ah screen la irundhu remove pannurom
+      setSearchResults((prev) =>
+        prev ? prev.filter((x) => x._id !== bookingId) : prev
+      );
+      await fetchBookings();
+    } catch (err) {
+      setActionError(err.message || "Could not delete this booking.");
     } finally {
       setActionId(null);
     }
@@ -688,7 +745,7 @@ function Admin() {
               type="text"
               className="form-control"
               style={{ flex: "1 1 260px" }}
-              placeholder="🔍 Search Order ID (e.g. order_Nxxxx...)"
+              placeholder="🔍 Search Order ID (e.g. HH-FOOD-17...)"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
             />
@@ -753,7 +810,9 @@ function Admin() {
                                 <th>Item</th>
                                 <th>Details</th>
                                 <th>Price</th>
+                                <th>Payment</th>
                                 <th>Status</th>
+                                <th>Delete</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -788,11 +847,23 @@ function Admin() {
                                     </td>
                                     <td>₹{b.price}</td>
                                     <td>
+                                      <PaymentCell b={b} />
+                                    </td>
+                                    <td>
                                       {APPROVAL_REQUIRED_TYPES.includes(b.type) ? (
                                         <StatusBadge status={b.status} />
                                       ) : (
                                         <span className="text-muted">-</span>
                                       )}
+                                    </td>
+                                    <td>
+                                      <button
+                                        className="btn btn-sm btn-outline-danger"
+                                        disabled={actionId === b._id}
+                                        onClick={() => handleDelete(b._id)}
+                                      >
+                                        🗑️ Delete
+                                      </button>
                                     </td>
                                   </tr>
                                 );
@@ -843,6 +914,7 @@ function Admin() {
                         <th>Address</th>
                         <th>Items Ordered</th>
                         <th>Items Total</th>
+                        <th>Payment</th>
                         <th>Parking</th>
                       </tr>
                     </thead>
@@ -856,8 +928,16 @@ function Admin() {
                         const orderIds = [
                           ...new Set(
                             [...g.items, ...g.parkings]
-                              .map((x) => x.orderId)
+                              .map((x) => getOrderId(x))
                               .filter(Boolean)
+                          ),
+                        ];
+
+                        const paymentMethods = [
+                          ...new Set(
+                            [...g.items, ...g.parkings]
+                              .map((x) => getPaymentMethod(x))
+                              .filter((m) => m && m !== "-")
                           ),
                         ];
 
@@ -900,11 +980,6 @@ function Admin() {
                                           : ""}
                                         {" — ₹"}
                                         {item.price}
-                                        {APPROVAL_REQUIRED_TYPES.includes(item.type) && (
-                                          <span className="ms-2">
-                                            <StatusBadge status={item.status} />
-                                          </span>
-                                        )}
                                         {timings && timings.checkIn !== "-" && (
                                           <div
                                             className="text-muted"
@@ -921,6 +996,11 @@ function Admin() {
                               )}
                             </td>
                             <td className="fw-bold">₹{itemsTotal}</td>
+                            <td style={{ fontSize: "0.85rem" }}>
+                              {paymentMethods.length === 0
+                                ? "-"
+                                : paymentMethods.map((m) => <div key={m}>{m}</div>)}
+                            </td>
                             <td>
                               {g.parkings.length === 0 ? (
                                 <span className="text-muted">No</span>
@@ -932,7 +1012,7 @@ function Admin() {
                                       {p.details?.days || 1} day
                                       {(p.details?.days || 1) > 1 ? "s" : ""}
                                       {" (₹"}
-                                      {p.price}) <StatusBadge status={p.status} />
+                                      {p.price})
                                     </li>
                                   ))}
                                 </ul>
@@ -972,6 +1052,7 @@ function Admin() {
                         <th>Action</th>
                         <th>Price</th>
                         <th>Booked On</th>
+                        <th>Delete</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -981,7 +1062,7 @@ function Admin() {
                         return (
                           <tr key={b._id}>
                             <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
-                              {b.orderId || "-"}
+                              {getOrderId(b) || "-"}
                             </td>
                             <td style={{ textTransform: "capitalize" }}>{b.type}</td>
                             <td>{b.itemName}</td>
@@ -996,7 +1077,7 @@ function Admin() {
                                 <td>{timings.checkout}</td>
                               </>
                             )}
-                            <td>{b.paymentMethod || "-"}</td>
+                            <td>{getPaymentMethod(b)}</td>
                             <td>
                               <StatusBadge status={b.status} />
                             </td>
@@ -1005,6 +1086,15 @@ function Admin() {
                             </td>
                             <td>{b.price}</td>
                             <td>{new Date(b.createdAt).toLocaleString()}</td>
+                            <td>
+                              <button
+                                className="btn btn-sm btn-outline-danger"
+                                disabled={actionId === b._id}
+                                onClick={() => handleDelete(b._id)}
+                              >
+                                🗑️ Delete
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -1029,14 +1119,16 @@ function Admin() {
                         <th>Address</th>
                         <th>Booking Date</th>
                         <th>Price</th>
+                        <th>Payment</th>
                         <th>Booked On</th>
+                        <th>Delete</th>
                       </tr>
                     </thead>
                     <tbody>
                       {bookings.map((b) => (
                         <tr key={b._id}>
                           <td style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
-                            {b.orderId || "-"}
+                            {getOrderId(b) || "-"}
                           </td>
                           <td style={{ textTransform: "capitalize" }}>{b.type}</td>
                           <td>{b.itemName}</td>
@@ -1047,7 +1139,19 @@ function Admin() {
                           <td>{b.details?.address || "-"}</td>
                           <td>{b.details?.bookingDate || "-"}</td>
                           <td>{b.price}</td>
+                          <td>
+                            <PaymentCell b={b} />
+                          </td>
                           <td>{new Date(b.createdAt).toLocaleString()}</td>
+                          <td>
+                            <button
+                              className="btn btn-sm btn-outline-danger"
+                              disabled={actionId === b._id}
+                              onClick={() => handleDelete(b._id)}
+                            >
+                              🗑️ Delete
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

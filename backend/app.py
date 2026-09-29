@@ -690,6 +690,8 @@ def create_booking():
         "price": data.get("price", ""),
         # Bill la varra same Order ID - frontend "orderId" ah top-level la illa details la anuppinaalum edukkum.
         # Admin la "Search Order ID" ku idhu dhaan use aagum.
+        # Room/Hall/Parking ku booking appo Order ID irukkadhu - payment mudinja apram
+        # /api/booking/mark-paid la save aagum.
         "orderId": data.get("orderId") or details.get("orderId") or "",
         "details": details,  # any extra info (dates, qty, checkoutTime, slot, vehicleType etc.)
         "status": initial_status,
@@ -787,11 +789,15 @@ def reject_booking(booking_id):
 @app.route('/api/booking/mark-paid/<booking_id>', methods=['POST'])
 def mark_booking_paid(booking_id):
     """Customer completes payment (Online / QR / Cash on Delivery) from the
-    Booking History page. Body: { "paymentMethod": "Online" | "QR" | "Cash on Delivery" }
-    Moves booking from 'awaiting_payment' to 'confirmed', sends the final
-    confirmation email, and (for room type) checks for a voucher unlock."""
+    Booking History page.
+    Body: { "paymentMethod": "Online" | "QR" | "Cash on Delivery",
+            "orderId": "order_Nxxxx" (optional - the Order ID shown on the bill) }
+    Moves booking from 'awaiting_payment' to 'confirmed', saves the Order ID
+    (so Admin dashboard shows it), sends the final confirmation email, and
+    (for room type) checks for a voucher unlock."""
     data = request.get_json() or {}
     payment_method = data.get("paymentMethod")
+    payment_order_id = (data.get("orderId") or "").strip()
 
     if payment_method not in ("Online", "QR", "Cash on Delivery"):
         return jsonify({"error": "paymentMethod must be Online, QR, or Cash on Delivery"}), 400
@@ -806,12 +812,19 @@ def mark_booking_paid(booking_id):
     if booking.get("status") != "awaiting_payment":
         return jsonify({"error": f"Booking is not awaiting payment (current status: {booking.get('status')})"}), 400
 
+    update_fields = {"status": "confirmed", "paymentMethod": payment_method}
+    # Order ID vandhaa mattum save pannum (illana already irukura value apdiye irukkum)
+    if payment_order_id:
+        update_fields["orderId"] = payment_order_id
+
     bookings_collection.update_one(
         {"_id": booking["_id"]},
-        {"$set": {"status": "confirmed", "paymentMethod": payment_method}}
+        {"$set": update_fields}
     )
     booking["status"] = "confirmed"
     booking["paymentMethod"] = payment_method
+    if payment_order_id:
+        booking["orderId"] = payment_order_id
 
     email_sent = False
     if booking.get("userEmail"):
