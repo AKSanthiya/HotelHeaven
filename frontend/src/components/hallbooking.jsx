@@ -118,7 +118,7 @@ function HallBooking() {
   };
 
   return (
-    <div className="hall-booking-page">
+    <div className="hall-booking-page" style={{ paddingTop: "110px" }}>
       <div className="hall-booking-header">
         <h1>🎉 Hall Booking</h1>
         <p>Choose the perfect hall for your event</p>

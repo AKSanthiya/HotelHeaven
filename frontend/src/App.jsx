@@ -14,6 +14,7 @@ import HallCheckout from "./components/hallcheckout";
 import Parking from "./components/parking";
 import ParkingCheckout from "./components/parkingcheckout";
 import Chatbot from "./components/Chatbot";
+import BookingHistory from "./components/BookingHistory";
 
 
 function AppContent() {
@@ -38,8 +39,9 @@ function AppContent() {
         <Route path="/hall-checkout" element={<HallCheckout />} />
         <Route path="/parking" element={<Parking />} />
         <Route path="/parking-checkout" element={<ParkingCheckout />} />
+        <Route path="/booking-history" element={<BookingHistory />} />
 
-        {/* Theriyaadha URL (example: /booking-history, /login/home) vandha Home ku anuppum */}
+        {/* Theriyaadha URL (example: /login/home) vandha Home ku anuppum */}
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
 

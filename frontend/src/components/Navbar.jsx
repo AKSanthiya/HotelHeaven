@@ -96,7 +96,14 @@ function Navbar() {
               </Link>
             </li>
 
-            
+            {/* Booking History - login pannirundha mattum theriyum */}
+            {user && (
+              <li className="nav-item">
+                <Link className="nav-link" to="/booking-history">
+                  📋 Booking History
+                </Link>
+              </li>
+            )}
 
             {/* Contact */}
             <li className="nav-item">

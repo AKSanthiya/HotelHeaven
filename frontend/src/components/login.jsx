@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { signInWithPopup } from "firebase/auth";
+import {
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+} from "firebase/auth";
 import { auth, googleProvider } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import hotelImg from "./food images/hotelheaven1.jpg";
@@ -7,6 +11,21 @@ import hotelImg from "./food images/hotelheaven1.jpg";
 function Login() {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
+
+  // Login success aana apram common ah run aagura code (popup & redirect rendukkum)
+  const handleLoginSuccess = (user) => {
+    fetch("https://hotelheaven.onrender.com/send-welcome-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: user.email, name: user.displayName }),
+    })
+      .then((res) => res.json())
+      .then((data) => console.log("Email response:", data))
+      .catch((err) => console.error("Email sending error:", err));
+
+    // Leading slash is important: absolute path, so /login la irundhaalum /home ku dhaan pogum
+    navigate("/home");
+  };
 
   useEffect(() => {
     document.body.style.margin = "0";
@@ -60,32 +79,48 @@ function Login() {
     };
   }, []);
 
+  // Popup block aagi redirect method ku poi thirumba vandha, inga result ah handle pannum
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result && result.user) {
+          handleLoginSuccess(result.user);
+        }
+      })
+      .catch((error) => {
+        console.error("Redirect login failed:", error);
+        alert("Login failed. Please try again.");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleGoogleLogin = async () => {
     // Guard: if a login is already in progress, ignore extra clicks
     if (isLoading) return;
 
     setIsLoading(true);
     try {
+      // Popup call must stay the first async action inside the click handler,
+      // otherwise the browser treats it as "not a user click" and blocks it.
       const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-
-      fetch("https://hotelheaven.onrender.com/send-welcome-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: user.email, name: user.displayName }),
-      })
-        .then((res) => res.json())
-        .then((data) => console.log("Email response:", data))
-        .catch((err) => console.error("Email sending error:", err));
-
-      // Leading slash is important: absolute path, so /login la irundhaalum /home ku dhaan pogum
-      navigate("/home");
+      handleLoginSuccess(result.user);
     } catch (error) {
       console.error("Login failed:", error);
 
-      // Don't show an alert for a cancelled popup — that's not a real error,
-      // it just means the user closed the popup or clicked again too fast.
-      if (
+      if (error.code === "auth/popup-blocked") {
+        // Browser popup ah block pannichu -> redirect method ku automatic ah maarum
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return; // page Google ku poidum, so inga stop
+        } catch (redirectError) {
+          console.error("Redirect login failed:", redirectError);
+          alert(
+            "Popup blocked. Please allow popups for this site and try again."
+          );
+        }
+      } else if (
+        // Don't show an alert for a cancelled popup — that's not a real error,
+        // it just means the user closed the popup or clicked again too fast.
         error.code !== "auth/cancelled-popup-request" &&
         error.code !== "auth/popup-closed-by-user"
       ) {

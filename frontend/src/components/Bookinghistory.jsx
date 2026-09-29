@@ -1,324 +1,347 @@
-import React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
-import "./Rooms.css";
 
-// ============================================================
-// This page closes the loop started in RoomCheckout.jsx:
-//
-//   pending  -> (admin approves)      -> awaiting_payment
-//   awaiting_payment -> (customer picks a method here) -> confirmed
-//
-// Backend routes used (see app.py):
-//   GET  /api/bookings/my/<email>              -> this customer's bookings
-//   POST /api/bookings/<id>/payment-method      -> { method: "online" | "pay_on_arrival" }
-//   POST /api/verify-payment                    -> { ...razorpay fields, bookingId }
-// ============================================================
+import nandhiniQR from "../assets/nandhini-qr.jpeg";
 
-function loadRazorpayScript() {
-  return new Promise((resolve) => {
-    if (document.getElementById("razorpay-checkout-js")) {
-      resolve(true);
-      return;
-    }
+const API = "https://hotelheaven.onrender.com";
+
+const QR_IMAGE = nandhiniQR;
+
+const TYPE_TABS = [
+  { key: "all", label: "All" },
+  { key: "room", label: "Rooms" },
+  { key: "food", label: "Food" },
+  { key: "hall", label: "Halls" },
+  { key: "parking", label: "Parking" },
+];
+
+const STATUS = {
+  pending: { label: "Waiting for approval", cls: "bg-warning text-dark" },
+  awaiting_payment: { label: "Payment pending", cls: "bg-info text-dark" },
+  confirmed: { label: "Confirmed", cls: "bg-success" },
+  rejected: { label: "Rejected", cls: "bg-danger" },
+};
+
+const getAmount = (price) => {
+  const n = parseFloat(String(price ?? "").replace(/[^\d.]/g, ""));
+  return isNaN(n) ? 0 : n;
+};
+
+const formatDate = (iso) => {
+  if (!iso) return "-";
+  return new Date(iso).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const getDetails = (b) => {
+  const d = b.details || {};
+  const parts = [];
+  if (d.roomNumber) parts.push(`Room ${d.roomNumber}`);
+  if (d.linkedRoomNumber) parts.push(`Room ${d.linkedRoomNumber}`);
+  if (d.slot) parts.push(`Slot ${d.slot}`);
+  if (d.vehicleNumber) parts.push(d.vehicleNumber);
+  if (d.days && b.type !== "food") parts.push(`${d.days} day(s)`);
+  if (d.bookingDate) parts.push(`On ${String(d.bookingDate).replace("T", " ")}`);
+  return parts.join(", ") || "-";
+};
+
+const loadRazorpay = () =>
+  new Promise((resolve) => {
+    if (window.Razorpay) return resolve(true);
     const script = document.createElement("script");
-    script.id = "razorpay-checkout-js";
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
     script.onload = () => resolve(true);
     script.onerror = () => resolve(false);
     document.body.appendChild(script);
   });
-}
-
-function formatDateTime(value) {
-  if (!value) return "";
-  try {
-    return new Date(value).toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    });
-  } catch {
-    return value;
-  }
-}
-
-const STATUS_BADGES = {
-  pending: { label: "Waiting for admin approval", className: "bg-warning text-dark" },
-  awaiting_payment: { label: "Approved — choose payment", className: "bg-info text-dark" },
-  confirmed: { label: "Confirmed", className: "bg-success" },
-  rejected: { label: "Rejected", className: "bg-danger" },
-};
-
-function StatusBadge({ status }) {
-  const info = STATUS_BADGES[status] || { label: status || "Unknown", className: "bg-secondary" };
-  return <span className={`badge ${info.className}`}>{info.label}</span>;
-}
-
-function BookingCard({ booking, onPayOnArrival, onPayOnline, busyId }) {
-  const details = booking.details || {};
-  const isBusy = busyId === booking._id;
-
-  return (
-    <div className="card shadow-sm p-3 mb-3">
-      <div className="d-flex justify-content-between align-items-start flex-wrap gap-2">
-        <div>
-          <h5 className="fw-bold mb-1">
-            {booking.type === "room" ? "🛏️ " : booking.type === "parking" ? "🅿️ " : booking.type === "hall" ? "🎉 " : "🍽️ "}
-            {booking.itemName}
-          </h5>
-          <p className="text-muted mb-1" style={{ fontSize: "0.85rem" }}>
-            Booked on {formatDateTime(booking.createdAt)}
-          </p>
-          {details.bookingDate && (
-            <p className="text-muted mb-1" style={{ fontSize: "0.85rem" }}>
-              Check-in: {formatDateTime(details.bookingDate)}
-            </p>
-          )}
-          <p className="fw-semibold mb-0">₹{booking.price}</p>
-        </div>
-        <StatusBadge status={booking.status} />
-      </div>
-
-      {booking.type === "room" && booking.status === "awaiting_payment" && (
-        <div className="mt-3 pt-3 border-top">
-          <p className="fw-semibold mb-2" style={{ fontSize: "0.9rem" }}>
-            Your room is confirmed by our team — how would you like to pay?
-          </p>
-          <div className="d-flex gap-2 flex-wrap">
-            <button
-              className="btn btn-outline-dark fw-bold"
-              disabled={isBusy}
-              onClick={() => onPayOnArrival(booking)}
-            >
-              {isBusy ? "Please wait..." : "Pay on Arrival"}
-            </button>
-            <button
-              className="btn btn-success fw-bold"
-              disabled={isBusy}
-              onClick={() => onPayOnline(booking)}
-            >
-              {isBusy ? "Opening Payment..." : `Pay ₹${booking.price} Online`}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {booking.type === "room" && booking.status === "pending" && (
-        <div className="alert alert-warning mt-3 mb-0" style={{ fontSize: "0.85rem" }}>
-          Namma team unga request-ah review pannitu irukku. Approve aana udane, payment
-          option ithe page-ல தோன்றும், அது பத்தி மெயில் தனியா வரும்.
-        </div>
-      )}
-
-      {booking.status === "confirmed" && details.paymentMethod && (
-        <p className="text-muted mt-2 mb-0" style={{ fontSize: "0.85rem" }}>
-          Payment: {details.paymentMethod}
-        </p>
-      )}
-
-      {booking.status === "rejected" && (
-        <div className="alert alert-danger mt-3 mb-0" style={{ fontSize: "0.85rem" }}>
-          Sorry, this request could not be confirmed. Please try booking another room.
-        </div>
-      )}
-    </div>
-  );
-}
 
 function BookingHistory() {
-  const navigate = useNavigate();
-  const [authChecked, setAuthChecked] = React.useState(false);
-  const [userEmail, setUserEmail] = React.useState(null);
-  const [bookings, setBookings] = React.useState([]);
-  const [loading, setLoading] = React.useState(true);
-  const [busyId, setBusyId] = React.useState(null);
-  const [errorMsg, setErrorMsg] = React.useState("");
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all");
+  const [payingBooking, setPayingBooking] = useState(null); // payment popup la irukkura booking
+  const [showQR, setShowQR] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null); // { type: "success" | "danger", text }
 
-  const fetchBookings = React.useCallback((email) => {
-    setLoading(true);
-    fetch(`https://hotelheaven.onrender.com/api/bookings/my/${encodeURIComponent(email)}`)
-      .then((res) => res.json())
-      .then((data) => {
-        setBookings(Array.isArray(data) ? data : []);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch booking history:", err);
-        setErrorMsg("Booking history load aagala. Please check whether the backend is running.");
-        setLoading(false);
-      });
-  }, []);
-
-  React.useEffect(() => {
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
       setAuthChecked(true);
-      if (!currentUser) {
-        navigate("/login");
-        return;
-      }
-      setUserEmail(currentUser.email);
-      fetchBookings(currentUser.email);
     });
     return () => unsubscribe();
-  }, [navigate, fetchBookings]);
+  }, []);
 
-  // ---------- Pay on Arrival: one call, backend confirms + emails immediately ----------
-  const handlePayOnArrival = async (booking) => {
-    setBusyId(booking._id);
+  const fetchBookings = async (email) => {
     try {
-      const res = await fetch(
-        `https://hotelheaven.onrender.com/api/bookings/${booking._id}/payment-method`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ method: "pay_on_arrival" }),
-        }
-      );
+      const res = await fetch(`${API}/api/user-bookings/${encodeURIComponent(email)}`);
       const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || "Could not confirm the booking. Please try again.");
-        return;
-      }
-      fetchBookings(userEmail);
+      setBookings(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Pay on arrival failed:", err);
-      alert("Something went wrong. Please check your connection and try again.");
+      console.error("Could not load bookings:", err);
+      setMessage({ type: "danger", text: "Could not load your bookings. Please try again." });
     } finally {
-      setBusyId(null);
+      setLoading(false);
     }
   };
 
-  // ---------- Pay Online: get a Razorpay order tied to this bookingId, then verify ----------
-  const handlePayOnline = async (booking) => {
-    setBusyId(booking._id);
+  useEffect(() => {
+    if (user?.email) {
+      fetchBookings(user.email);
+    } else if (authChecked) {
+      setLoading(false);
+    }
+  }, [user, authChecked]);
+
+  const closePopup = () => {
+    setPayingBooking(null);
+    setShowQR(false);
+  };
+
+  // Payment mudinja apram backend la booking ah "confirmed" nu maathum
+  const markPaid = async (booking, paymentMethod, orderId) => {
+    const res = await fetch(`${API}/api/booking/mark-paid/${booking._id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paymentMethod, orderId: orderId || "" }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not record payment");
+    return data;
+  };
+
+  const handleOfflinePayment = async (method) => {
+    setBusy(true);
     try {
-      const scriptOk = await loadRazorpayScript();
-      if (!scriptOk) {
-        alert("Razorpay could not be loaded. Please check your internet connection and try again.");
-        setBusyId(null);
-        return;
-      }
+      await markPaid(payingBooking, method);
+      setMessage({ type: "success", text: "Booking confirmed! Confirmation email sent." });
+      closePopup();
+      await fetchBookings(user.email);
+    } catch (err) {
+      setMessage({ type: "danger", text: err.message });
+    } finally {
+      setBusy(false);
+    }
+  };
 
-      const orderRes = await fetch(
-        `https://hotelheaven.onrender.com/api/bookings/${booking._id}/payment-method`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ method: "online" }),
-        }
-      );
-      const orderData = await orderRes.json();
+  const handleOnlinePayment = async () => {
+    const booking = payingBooking;
+    const amount = getAmount(booking.price);
+    if (amount <= 0) {
+      setMessage({ type: "danger", text: "Invalid booking amount." });
+      return;
+    }
 
-      if (!orderRes.ok || !orderData.orderId) {
-        alert(orderData.error || "Unable to create the payment order. Please try again.");
-        setBusyId(null);
-        return;
-      }
+    setBusy(true);
+    try {
+      const loaded = await loadRazorpay();
+      if (!loaded) throw new Error("Could not load Razorpay. Check your internet.");
+
+      const orderRes = await fetch(`${API}/api/create-order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount }),
+      });
+      const order = await orderRes.json();
+      if (!orderRes.ok) throw new Error(order.error || "Could not create payment order");
 
       const options = {
-        key: orderData.keyId,
-        amount: orderData.amount,
-        currency: orderData.currency,
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency,
+        order_id: order.orderId,
         name: "Hotel Heaven",
-        description: `Payment for ${booking.itemName}`,
-        order_id: orderData.orderId,
-        handler: async function (response) {
+        description: booking.itemName,
+        prefill: { name: user.displayName || "", email: user.email || "" },
+        theme: { color: "#0a3d62" },
+        handler: async (response) => {
           try {
-            const verifyRes = await fetch("https://hotelheaven.onrender.com/api/verify-payment", {
+            const verifyRes = await fetch(`${API}/api/verify-payment`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-                bookingId: orderData.bookingId,
-              }),
+              body: JSON.stringify(response),
             });
-            const verifyData = await verifyRes.json();
-            if (verifyData.verified) {
-              fetchBookings(userEmail);
-            } else {
-              alert("Payment could not be verified. If the amount was debited, please contact support.");
-            }
+            const verify = await verifyRes.json();
+            if (!verifyRes.ok || !verify.verified) throw new Error("Payment verification failed");
+
+            await markPaid(booking, "Online", response.razorpay_order_id);
+            setMessage({ type: "success", text: "Payment successful! Booking confirmed." });
+            closePopup();
+            await fetchBookings(user.email);
           } catch (err) {
-            console.error("Verification call failed:", err);
-            alert("An error occurred while verifying the payment. Please contact support.");
+            setMessage({ type: "danger", text: err.message });
           } finally {
-            setBusyId(null);
+            setBusy(false);
           }
         },
-        modal: {
-          ondismiss: function () {
-            setBusyId(null);
-          },
-        },
-        prefill: {
-          name: booking.userName || "",
-          email: userEmail || "",
-        },
-        theme: { color: "#ffc107" },
+        modal: { ondismiss: () => setBusy(false) },
       };
 
-      const rzp = new window.Razorpay(options);
-      rzp.open();
+      new window.Razorpay(options).open();
     } catch (err) {
-      console.error("Online payment failed:", err);
-      alert("An error occurred while processing the payment. Please try again.");
-      setBusyId(null);
+      setMessage({ type: "danger", text: err.message });
+      setBusy(false);
     }
   };
 
-  if (!authChecked || loading) {
+  const visibleBookings =
+    filter === "all" ? bookings : bookings.filter((b) => b.type === filter);
+
+  // ---------- Not logged in ----------
+  if (authChecked && !user) {
     return (
-      <div className="rooms-page-wrapper" style={{ paddingTop: "120px" }}>
-        <div className="container text-center">
-          <p className="text-muted">Loading your bookings...</p>
-        </div>
+      <div className="container" style={{ paddingTop: "110px" }}>
+        <div className="alert alert-warning">Please login to see your booking history.</div>
       </div>
     );
   }
 
   return (
-    <div className="rooms-page-wrapper" style={{ paddingTop: "120px" }}>
-      <div className="container">
-        <h1 className="text-center fw-bold mb-4">📖 Booking History</h1>
+    <div className="container" style={{ paddingTop: "110px", paddingBottom: "40px" }}>
+      <h2 className="fw-bold mb-3" style={{ color: "#0a3d62" }}>My Booking History</h2>
 
-        {errorMsg && <div className="alert alert-danger">{errorMsg}</div>}
-
-        {bookings.length === 0 ? (
-          <div className="text-center">
-            <p className="text-muted">You don't have any bookings yet.</p>
-            <Link to="/rooms" className="btn btn-warning fw-bold">
-              🛏️ Book a Room
-            </Link>
-          </div>
-        ) : (
-          <div className="row justify-content-center">
-            <div className="col-md-8">
-              {bookings.map((booking) => (
-                <BookingCard
-                  key={booking._id}
-                  booking={booking}
-                  onPayOnArrival={handlePayOnArrival}
-                  onPayOnline={handlePayOnline}
-                  busyId={busyId}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="text-center mt-4">
-          <Link to="/" className="btn btn-dark">
-            ← Back to Home
-          </Link>
+      {message && (
+        <div className={`alert alert-${message.type} d-flex justify-content-between`}>
+          <span>{message.text}</span>
+          <button className="btn-close" onClick={() => setMessage(null)} aria-label="Close" />
         </div>
+      )}
+
+      {/* Type filter */}
+      <div className="d-flex flex-wrap gap-2 mb-3">
+        {TYPE_TABS.map((t) => (
+          <button
+            key={t.key}
+            className={`btn btn-sm ${filter === t.key ? "btn-dark" : "btn-outline-dark"}`}
+            onClick={() => setFilter(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
+
+      {loading ? (
+        <p>Loading your bookings...</p>
+      ) : visibleBookings.length === 0 ? (
+        <div className="alert alert-secondary">No bookings found.</div>
+      ) : (
+        <div className="table-responsive">
+          <table className="table table-bordered align-middle">
+            <thead className="table-dark">
+              <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Item</th>
+                <th>Details</th>
+                <th>Amount</th>
+                <th>Payment</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleBookings.map((b) => {
+                const st = STATUS[b.status] || { label: b.status, cls: "bg-secondary" };
+                return (
+                  <tr key={b._id}>
+                    <td>{formatDate(b.createdAt)}</td>
+                    <td className="text-capitalize">{b.type}</td>
+                    <td>{b.itemName}</td>
+                    <td>{getDetails(b)}</td>
+                    <td>Rs.{getAmount(b.price)}</td>
+                    <td>{b.paymentMethod || "-"}</td>
+                    <td>
+                      <span className={`badge ${st.cls}`}>{st.label}</span>
+                    </td>
+                    <td>
+                      {b.status === "awaiting_payment" ? (
+                        <button
+                          className="btn btn-sm btn-warning fw-bold"
+                          onClick={() => setPayingBooking(b)}
+                        >
+                          Pay Now
+                        </button>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ---------- Payment popup ---------- */}
+      {payingBooking && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            zIndex: 2000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+          }}
+        >
+          <div className="card p-4" style={{ maxWidth: "420px", width: "100%" }}>
+            <h5 className="fw-bold mb-1">Complete Payment</h5>
+            <p className="text-muted mb-3">
+              {payingBooking.itemName} - Rs.{getAmount(payingBooking.price)}
+            </p>
+
+            {showQR ? (
+              <>
+                {QR_IMAGE ? (
+                  <img src={QR_IMAGE} alt="Payment QR" className="img-fluid mb-3" />
+                ) : (
+                  <p className="text-muted">Scan the QR at the front desk and pay.</p>
+                )}
+                <button
+                  className="btn btn-success mb-2"
+                  disabled={busy}
+                  onClick={() => handleOfflinePayment("QR")}
+                >
+                  {busy ? "Please wait..." : "I have paid"}
+                </button>
+                <button className="btn btn-outline-secondary" onClick={() => setShowQR(false)}>
+                  Back
+                </button>
+              </>
+            ) : (
+              <div className="d-grid gap-2">
+                <button className="btn btn-dark" disabled={busy} onClick={handleOnlinePayment}>
+                  {busy ? "Please wait..." : "Pay Online"}
+                </button>
+                <button className="btn btn-outline-dark" disabled={busy} onClick={() => setShowQR(true)}>
+                  Pay by QR
+                </button>
+                <button
+                  className="btn btn-outline-dark"
+                  disabled={busy}
+                  onClick={() => handleOfflinePayment("Cash on Delivery")}
+                >
+                  Cash on Delivery
+                </button>
+                <button className="btn btn-link text-muted" disabled={busy} onClick={closePopup}>
+                  Cancel
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
