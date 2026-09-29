@@ -1,5 +1,5 @@
 import React from "react";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
 import About from "./components/About";
 import Navbar from "./components/Navbar";
 import Home from "./components/home";
@@ -38,7 +38,9 @@ function AppContent() {
         <Route path="/hall-checkout" element={<HallCheckout />} />
         <Route path="/parking" element={<Parking />} />
         <Route path="/parking-checkout" element={<ParkingCheckout />} />
-        
+
+        {/* Theriyaadha URL (example: /booking-history, /login/home) vandha Home ku anuppum */}
+        <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
 
       {!hideChrome && <Chatbot />}
