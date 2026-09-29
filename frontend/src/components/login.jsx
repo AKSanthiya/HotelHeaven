@@ -78,7 +78,8 @@ function Login() {
         .then((data) => console.log("Email response:", data))
         .catch((err) => console.error("Email sending error:", err));
 
-      navigate("home");
+      // Leading slash is important: absolute path, so /login la irundhaalum /home ku dhaan pogum
+      navigate("/home");
     } catch (error) {
       console.error("Login failed:", error);
 
