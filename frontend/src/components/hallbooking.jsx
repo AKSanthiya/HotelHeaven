@@ -227,7 +227,7 @@ function HallBooking() {
       )}
 
       <div className="text-center mt-4" style={{ textAlign: 'center', margin: '30px 0' }}>
-        <Link to="/" className="btn btn-dark">
+        <Link to="/home" className="btn btn-dark">
           ← Back to Home Page
         </Link>
       </div>

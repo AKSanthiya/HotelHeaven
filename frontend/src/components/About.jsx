@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import aboutImg from "../assets/hotelsheaven.png";
 import "./About.css";
 
@@ -115,6 +116,13 @@ function About() {
             </div>
           </div>
 
+        </div>
+
+        {/* Back to Home button */}
+        <div className="text-center mt-5">
+          <Link to="/home" className="btn btn-dark">
+            ← Back to Home Page
+          </Link>
         </div>
       </div>
     </section>

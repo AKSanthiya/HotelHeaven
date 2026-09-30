@@ -4,14 +4,40 @@
   margin: 0 auto;
 }
 
+/* Header: solid light box, so heading is readable on any page background */
 .hall-booking-header {
   text-align: center;
-  margin-bottom: 40px;
+  margin: 0 auto 30px;
+  max-width: 720px;
+  padding: 20px 24px;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
 }
 
 .hall-booking-header h1 {
   font-size: 2.2rem;
+  font-weight: 700;
   color: #6a1b9a;
+  margin: 0 0 6px;
+}
+
+.hall-booking-header p {
+  color: #333;
+  font-size: 1rem;
+  margin: 0;
+}
+
+/* Available / Booked legend: light pill, so text is readable */
+.hall-booking-page > .d-flex {
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+  padding: 8px 22px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #333;
+  border-radius: 20px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
 }
 
 .hall-grid {

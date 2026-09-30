@@ -14,7 +14,7 @@ import HallCheckout from "./components/hallcheckout";
 import Parking from "./components/parking";
 import ParkingCheckout from "./components/parkingcheckout";
 import Chatbot from "./components/Chatbot";
-import BookingHistory from "./components/BookingHistory";
+import BookingHistory from "./components/Bookinghistory";
 
 
 function AppContent() {

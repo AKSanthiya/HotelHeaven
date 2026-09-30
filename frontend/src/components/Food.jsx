@@ -998,7 +998,7 @@ function Food() {
 
         <div className="text-center mt-5">
           <Link
-            to="/"
+            to="/home"
             className="btn btn-dark"
             style={{ display: "inline-block" }}
           >
