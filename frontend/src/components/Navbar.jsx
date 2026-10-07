@@ -24,6 +24,13 @@ function Navbar() {
     }
   };
 
+  const scrollToContact = (e) => {
+    e.preventDefault();
+    document
+      .getElementById("contact")
+      ?.scrollIntoView({ behavior: "smooth", block: "end" });
+  };
+
   return (
     <nav className="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
       <div className="container">
@@ -105,11 +112,11 @@ function Navbar() {
               </li>
             )}
 
-            {/* Contact */}
+            {/* Contact - footer ku scroll aagum */}
             <li className="nav-item">
-              <Link className="nav-link" to="/home#contact">
+              <a className="nav-link" href="#contact" onClick={scrollToContact}>
                 Contact
-              </Link>
+              </a>
             </li>
 
             {/* User Avatar / Logout Dropdown */}

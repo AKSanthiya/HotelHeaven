@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
 import aboutImg from "../assets/sideviewhh.jpeg";
@@ -8,6 +8,8 @@ import "./Home.css";
 function Home() {
   const [user, setUser] = useState(null);
   const [voucher, setVoucher] = useState(null);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const location = useLocation();
 
   // Listen for Firebase login state (persists automatically across pages)
   useEffect(() => {
@@ -16,6 +18,29 @@ function Home() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Welcome message - oru login ku oru dhadava mattum
+  useEffect(() => {
+    if (!user) return;
+    const key = `welcomed_${user.uid}`;
+    if (sessionStorage.getItem(key)) return;
+
+    sessionStorage.setItem(key, "yes");
+    setShowWelcome(true);
+    const timer = setTimeout(() => setShowWelcome(false), 3500);
+    return () => clearTimeout(timer);
+  }, [user]);
+
+  // Other page la irundhu Contact click panna -> Home vandhu footer ku scroll
+  useEffect(() => {
+    if (location.state?.scrollTo === "contact") {
+      setTimeout(() => {
+        document
+          .getElementById("contact")
+          ?.scrollIntoView({ behavior: "smooth", block: "end" });
+      }, 150);
+    }
+  }, [location]);
 
   // Once we know who's logged in, check their voucher status
   useEffect(() => {
@@ -32,6 +57,13 @@ function Home() {
 
   return (
     <div className="home-page">
+
+      {/* WELCOME MESSAGE */}
+      {showWelcome && (
+        <div className="welcome-toast">
+          Welcome back, {user?.displayName?.split(" ")[0] || "Guest"} 👋
+        </div>
+      )}
 
       {/* VOUCHER NOTIFICATION BANNER */}
       {voucher && (
@@ -75,19 +107,19 @@ function Home() {
       {/* HERO SECTION */}
       <section className="hero" style={{ backgroundImage: `linear-gradient(90deg, rgba(2,15,32,0.95), rgba(2,15,32,0.45)), url(${aboutImg})` }}>
         <div className="hero-content">
-          <p className="welcome">Welcome to</p>
-          <h1>HOTEL<br />HEAVEN</h1>
+          <p className="welcome fade-up">Welcome to</p>
+          <h1 className="fade-up d1">HOTEL<br />HEAVEN</h1>
 
-          <div className="gold-line"></div>
+          <div className="gold-line line-grow"></div>
 
-          <h3>Your Comfort, Our Priority</h3>
+          <h3 className="fade-up d2">Your Comfort, Our Priority</h3>
 
-          <p className="hero-text">
+          <p className="hero-text fade-up d3">
             Experience comfortable rooms, delicious food
             and memorable celebrations under one roof.
           </p>
 
-          <div className="hero-buttons">
+          <div className="hero-buttons fade-up d4">
             <Link to="/rooms">
               <button>🛏 BOOK A ROOM</button>
             </Link>
@@ -105,28 +137,28 @@ function Home() {
 
         <div className="service-container">
 
-          <div className="service-card">
+          <div className="service-card fade-up d1">
             <div className="service-icon">🛏️</div>
             <h3>ROOM BOOKING</h3>
             <p>Comfortable and luxurious rooms for a relaxing stay.</p>
             <Link to="/rooms">BOOK NOW →</Link>
           </div>
 
-          <div className="service-card">
+          <div className="service-card fade-up d2">
             <div className="service-icon">🍽️</div>
             <h3>FOOD & RESTAURANT</h3>
             <p>Delicious food with a great dining experience.</p>
             <Link to="/food">EXPLORE FOOD →</Link>
           </div>
 
-          <div className="service-card">
+          <div className="service-card fade-up d3">
             <div className="service-icon">🎉</div>
             <h3>PARTY HALL</h3>
             <p>Perfect space for weddings, birthdays and events.</p>
             <Link to="/hall-booking">VIEW HALLS →</Link>
           </div>
 
-          <div className="service-card">
+          <div className="service-card fade-up d4">
             <div className="service-icon">🚗</div>
             <h3>PARKING</h3>
             <p>Safe and convenient parking facilities.</p>
@@ -206,7 +238,7 @@ function Home() {
             <p><Link to="/parking">Parking</Link></p>
           </div>
 
-          <div>
+          <div id="contact">
             <h3>CONTACT US</h3>
             <p>📞 +91 90801 44082</p>
             <p>✉️ info@hotelheaven.com</p>
