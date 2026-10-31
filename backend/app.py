@@ -636,6 +636,94 @@ def release_expired_rooms():
         return 0
 
 
+# ---------- Hall Auto-Release (NEW) ----------
+def calculate_hall_end_utc(details):
+    """
+    Hall booking-oda END time (UTC) ah calculate pannum.
+    - Customer choose panna booking date (IST) la irundhu, andha naal MUDINJA aprm (next day 12:00 AM IST)
+      hall free aagum.
+    - details la "days" irundha (multi-day event) andha naal count um add aagum. Illana 1 day.
+    - Date field name: bookingDate (illana eventDate / date nu fallback).
+    Returns a datetime in UTC, or None if the date is missing / invalid.
+    """
+    date_str = details.get("bookingDate") or details.get("eventDate") or details.get("date")
+    if not date_str:
+        return None
+
+    try:
+        # "2026-11-05" (date only) or "2026-11-05T10:00" (date+time) - rendu um work aagum
+        start_ist = datetime.fromisoformat(str(date_str).replace("Z", "")[:19])
+    except ValueError:
+        return None
+
+    days = details.get("days", 1) or 1
+    try:
+        days = int(days)
+    except (ValueError, TypeError):
+        days = 1
+    if days < 1:
+        days = 1
+
+    # andha naal-oda 12:00 AM (IST) la irundhu count pannrom -> naal mudinja aprm thaan free
+    day_start_ist = start_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_ist = day_start_ist + timedelta(days=days)
+
+    # IST -> UTC (scheduler utcnow use pannum)
+    return end_ist - IST_OFFSET
+
+
+def release_expired_halls():
+    """
+    Booking date mudinja hall bookings ah "released" nu mark pannum,
+    so andha hall ah next customer book panna mudiyum.
+    - Booking record delete aagadhu (admin history, analytics ellam apdiye irukkum).
+    - Just "hallReleased": True nu set aagum; booked-halls list la irundhu remove aagum.
+    Returns how many halls were released in this run.
+    """
+    try:
+        now = datetime.utcnow()
+        released_count = 0
+
+        # hallReleased field illaadha old bookings um include aagum ($ne True)
+        active_halls = bookings_collection.find({
+            "type": "hall",
+            "hallReleased": {"$ne": True}
+        })
+
+        for booking in active_halls:
+            details = booking.get("details", {}) or {}
+
+            # New bookings la hallEndTime already save aagirukkum; old bookings ku bookingDate la irundhu calculate pannrom
+            end_str = details.get("hallEndTime")
+            end_dt = None
+            if end_str:
+                try:
+                    end_dt = datetime.fromisoformat(end_str.replace("Z", ""))
+                except ValueError:
+                    end_dt = None
+            if end_dt is None:
+                end_dt = calculate_hall_end_utc(details)
+            if end_dt is None:
+                continue
+
+            if now >= end_dt:
+                bookings_collection.update_one(
+                    {"_id": booking["_id"]},
+                    {"$set": {
+                        "hallReleased": True,
+                        "hallReleasedAt": now.isoformat() + "Z"
+                    }}
+                )
+                released_count += 1
+                print(f"Hall released after booking date: {booking.get('itemName')}")
+
+        return released_count
+
+    except Exception as e:
+        print("Hall auto-release failed:", e)
+        return 0
+
+
 # ---------- Booking Routes ----------
 # type: "room" | "hall" | "parking" | "food"
 # status flow for room/hall/parking: pending -> awaiting_payment -> confirmed
@@ -679,6 +767,13 @@ def create_booking():
         details["checkInTime"] = check_in_datetime.isoformat() + "Z"
         details["checkoutTime"] = checkout_datetime.isoformat() + "Z"
 
+    # For hall bookings, calculate when the hall becomes free again
+    # (booking date mudinja aprm) and store it as hallEndTime (UTC).
+    if booking_type == "hall":
+        hall_end = calculate_hall_end_utc(details)
+        if hall_end:
+            details["hallEndTime"] = hall_end.isoformat() + "Z"
+
     # Room/Hall/Parking need admin approval first; Food is instant-confirm.
     initial_status = "pending" if booking_type in APPROVAL_REQUIRED_TYPES else "confirmed"
 
@@ -698,6 +793,7 @@ def create_booking():
         "paymentMethod": None if booking_type in APPROVAL_REQUIRED_TYPES else "Online",
         "checkoutReminderSent": False,   # used by the reminder scheduler below
         "roomReleased": False,           # room bookings: checkout mudinja aprm True aagum (auto-release)
+        "hallReleased": False,           # hall bookings: booking date mudinja aprm True aagum (auto-release)
         "createdAt": created_at.isoformat() + "Z"
     }
 
@@ -905,10 +1001,19 @@ def get_booked_rooms():
 
 @app.route('/api/booked-halls', methods=['GET'])
 def get_booked_halls():
-    """Returns itemName list of booked halls, so Hall page can mark them as Booked.
-    A hall counts as booked unless its booking was rejected."""
+    """Returns itemName list of CURRENTLY booked halls, so Hall page can mark them as Booked.
+    A hall counts as booked while it's pending / awaiting_payment / confirmed - only
+    'rejected' or date-released halls are free again.
+    Booking date mudinja halls ah first release pannitu, apram thaan list tharum -
+    so scheduler-ku wait pannaama udane free aagum."""
+    release_expired_halls()
+
     halls = bookings_collection.find(
-        {"type": "hall", "status": {"$ne": "rejected"}},
+        {
+            "type": "hall",
+            "hallReleased": {"$ne": True},
+            "status": {"$ne": "rejected"}
+        },
         {"itemName": 1}
     )
     booked_names = [h["itemName"] for h in halls]
@@ -1327,8 +1432,10 @@ Strawberry Rs.85, Tender Coconut Rs.120, Vanilla Rs.70
 
 def get_live_availability():
     """Live booking status from MongoDB, appended to every chatbot prompt."""
-    # Checkout mudinja rooms ah first release pannidrom, so chatbot correct availability solum
+    # Checkout / booking date mudinja rooms & halls ah first release pannidrom,
+    # so chatbot correct availability solum
     release_expired_rooms()
+    release_expired_halls()
 
     booked_rooms = [
         b["itemName"] for b in bookings_collection.find(
@@ -1337,7 +1444,7 @@ def get_live_availability():
     ]
     booked_halls = [
         b["itemName"] for b in bookings_collection.find(
-            {"type": "hall", "status": {"$ne": "rejected"}}, {"itemName": 1}
+            {"type": "hall", "hallReleased": {"$ne": True}, "status": {"$ne": "rejected"}}, {"itemName": 1}
         )
     ]
     booked_slots = []
@@ -1423,8 +1530,10 @@ def send_checkout_reminders():
 
 scheduler = BackgroundScheduler()
 scheduler.add_job(func=send_checkout_reminders, trigger="interval", minutes=5)
-# NEW: every 1 minute checkout mudinja rooms ah automatic ah free pannum
+# every 1 minute checkout mudinja rooms ah automatic ah free pannum
 scheduler.add_job(func=release_expired_rooms, trigger="interval", minutes=1)
+# NEW: every 1 minute booking date mudinja halls ah automatic ah free pannum
+scheduler.add_job(func=release_expired_halls, trigger="interval", minutes=1)
 scheduler.start()
 
 
