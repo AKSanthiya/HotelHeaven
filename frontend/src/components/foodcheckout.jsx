@@ -4,30 +4,9 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
 import nandhiniQR from "../assets/nandhini-qr.jpeg";
 
-// ---------- Razorpay public Key ID (safe to expose in frontend - NOT the secret) ----------
-// Backend kudukkura keyId ye first use aagum; idhu just fallback.
-const RAZORPAY_KEY_ID = "rzp_test_TeFdyXXi625Mk3";
-
-// ---------- Load the Razorpay Checkout.js script only once ----------
-function loadRazorpayScript() {
-  return new Promise((resolve) => {
-    if (document.getElementById("razorpay-checkout-js")) {
-      resolve(true);
-      return;
-    }
-    const script = document.createElement("script");
-    script.id = "razorpay-checkout-js";
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-}
-
-// ---------- 3 payment options: cod | razorpay | qr ----------
+// ---------- 2 payment options: cod | qr ----------
 const PAYMENT_OPTIONS = [
   { value: "cod", icon: "💵", title: "Cash on Delivery", sub: "Pay at delivery" },
-  { value: "razorpay", icon: "💳", title: "Online Payment", sub: "Card / Netbanking" },
   { value: "qr", icon: "📱", title: "Pay with QR", sub: "Scan & pay via UPI" },
 ];
 
@@ -41,7 +20,7 @@ function PaymentMethodSelector({ value, onChange, groupName }) {
             key={opt.value}
             onClick={() => onChange(opt.value)}
             style={{
-              flex: "1 1 30%",
+              flex: "1 1 45%",
               minWidth: "120px",
               border: selected ? "2px solid #ffc107" : "1px solid #ccc",
               borderRadius: "8px",
@@ -132,10 +111,9 @@ function FoodCheckout() {
     phone: "",
   });
 
-  // ---------- Payment method: "cod" | "razorpay" | "qr" ----------
-  const [paymentMethod, setPaymentMethod] = React.useState("razorpay");
+  // ---------- Payment method: "cod" | "qr" ----------
+  const [paymentMethod, setPaymentMethod] = React.useState("cod");
   const [utr, setUtr] = React.useState("");
-  const [payingNow, setPayingNow] = React.useState(false); // Razorpay modal open aagum pothu
 
   // What was actually used for the placed order (label + status) - shown on the bill screen
   const [placedPayment, setPlacedPayment] = React.useState(null);
@@ -280,7 +258,7 @@ function FoodCheckout() {
   };
 
   // ---------- Actually save the order to MongoDB ----------
-  // paymentStatus: "Paid" (Razorpay / fully voucher-covered) | "Pending Verification" (QR) | "Cash on Delivery"
+  // paymentStatus: "Paid" (fully voucher-covered) | "Pending Verification" (QR) | "Cash on Delivery"
   const placeOrder = async (paymentLabel, paymentStatus, utrValue = "") => {
     setSubmitting(true);
     try {
@@ -354,93 +332,6 @@ function FoodCheckout() {
     }
   };
 
-  // ============================================================
-  // ---------- RAZORPAY PAYMENT FLOW ----------
-  // amount = rupees (not paise); onSuccess(paymentId) called after
-  // backend verifies the payment signature.
-  // ============================================================
-  const startRazorpayPayment = async ({ amount, onSuccess }) => {
-    setPayingNow(true);
-    try {
-      const scriptOk = await loadRazorpayScript();
-      if (!scriptOk) {
-        alert("Razorpay load aagala. Internet connection check pannunga.");
-        setPayingNow(false);
-        return;
-      }
-
-      // Step 1: Backend la order create pannurom
-      const orderRes = await fetch("https://hotelheaven.onrender.com/api/create-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount }),
-      });
-      const orderData = await orderRes.json();
-
-      if (!orderData.orderId) {
-        console.error("Create order response:", orderData);
-        alert("Payment order create panna mudiyala. Backend server run aaguthaa nu check pannunga.");
-        setPayingNow(false);
-        return;
-      }
-
-      // Step 2: Razorpay checkout popup open pannurom
-      const options = {
-        key: orderData.keyId || RAZORPAY_KEY_ID,
-        amount: orderData.amount,
-        currency: orderData.currency,
-        name: "Hotel Heaven",
-        description: "Food Order Payment",
-        order_id: orderData.orderId,
-        handler: async function (response) {
-          // Step 3: Payment success aana, backend la signature verify pannurom
-          try {
-            const verifyRes = await fetch("https://hotelheaven.onrender.com/api/verify-payment", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-              }),
-            });
-            const verifyData = await verifyRes.json();
-
-            if (verifyData.verified) {
-              onSuccess(response.razorpay_payment_id);
-            } else {
-              alert("Payment verify aagala! Amount debit aayirundhaalum order confirm aagala - support ah contact pannunga.");
-            }
-          } catch (err) {
-            console.error("Verification call failed:", err);
-            alert("Payment verify pannum pothu error. Support ah contact pannunga.");
-          } finally {
-            setPayingNow(false);
-          }
-        },
-        modal: {
-          // User checkout popup ah close pannitanunu, busy state reset pannurom
-          ondismiss: function () {
-            setPayingNow(false);
-          },
-        },
-        prefill: {
-          name: form.name || "",
-          email: form.email || "",
-          contact: form.phone || "",
-        },
-        theme: { color: "#ffc107" },
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.open();
-    } catch (err) {
-      console.error("Razorpay payment failed:", err);
-      alert("Payment process pannum pothu error vandhuchu. Try again pannunga.");
-      setPayingNow(false);
-    }
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -470,23 +361,15 @@ function FoodCheckout() {
       // Fully voucher-covered order - payment onnum thevai illa
       await placeOrder("Voucher (Fully Covered)", "Paid");
     } else if (paymentMethod === "cod") {
-      // No payment gateway involved at all
+      // Cash on Delivery - no online payment involved
       await placeOrder("Cash on Delivery", "Cash on Delivery");
-    } else if (paymentMethod === "qr") {
+    } else {
       // QR payment - UTR kudutha aprom order "Pending Verification" nu save aagum
       if (!/^\d{12}$/.test(utr)) {
         alert("Enter the 12-digit UTR / Reference No. from your UPI app 🔢");
         return;
       }
       await placeOrder(`UPI QR (UTR: ${utr})`, "Pending Verification", utr);
-    } else {
-      // Real Razorpay payment - popup open aagum, success aana order save aagum
-      startRazorpayPayment({
-        amount: payableAmount,
-        onSuccess: (paymentId) => {
-          placeOrder(`Online Payment (Razorpay - ${paymentId})`, "Paid");
-        },
-      });
     }
   };
 
@@ -1114,19 +997,15 @@ function FoodCheckout() {
                 <button
                   type="submit"
                   className="btn btn-warning fw-bold w-100 mt-2"
-                  disabled={submitting || payingNow || !authChecked}
+                  disabled={submitting || !authChecked}
                 >
-                  {payingNow
-                    ? "Opening Payment..."
-                    : submitting
+                  {submitting
                     ? "Processing..."
                     : hasVoucher && payableAmount === 0
                     ? "Place Order (FREE 🎉)"
                     : paymentMethod === "cod"
                     ? "Place Order (Pay on Delivery)"
-                    : paymentMethod === "qr"
-                    ? "Submit Payment Details"
-                    : `Pay ₹${payableAmount} Online`}
+                    : "Submit Payment Details"}
                 </button>
               </form>
             </div>
