@@ -4,9 +4,6 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../firebase";
 import "./Rooms.css";
 
-// ---------- Razorpay public Key ID (safe to expose in frontend - NOT the secret) ----------
-const RAZORPAY_KEY_ID = "rzp_test_TeFdyXXi625Mk3";
-
 // Nandhini QR image -> frontend/public/nandhini-qr.jpeg
 const QR_IMAGE_SRC = "/nandhini-qr.jpeg";
 
@@ -43,26 +40,9 @@ function buildBookingDate({ date, hour, minute, ampm }) {
   return `${date}T${String(h).padStart(2, "0")}:${minute}`;
 }
 
-// ---------- Load the Razorpay Checkout.js script only once ----------
-function loadRazorpayScript() {
-  return new Promise((resolve) => {
-    if (document.getElementById("razorpay-checkout-js")) {
-      resolve(true);
-      return;
-    }
-    const script = document.createElement("script");
-    script.id = "razorpay-checkout-js";
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-}
-
-// ---------- 3 payment options: hotel | razorpay | qr ----------
+// ---------- 2 payment options: hotel | qr ----------
 const PAYMENT_OPTIONS = [
   { value: "hotel", icon: "🏨", title: "Cash at Hotel", sub: "Pay at reception" },
-  { value: "razorpay", icon: "💳", title: "Online Payment", sub: "Card / Netbanking" },
   { value: "qr", icon: "📱", title: "Pay with QR", sub: "Scan & pay via UPI" },
 ];
 
@@ -76,7 +56,7 @@ function PaymentMethodSelector({ value, onChange, groupName }) {
             key={opt.value}
             onClick={() => onChange(opt.value)}
             style={{
-              flex: "1 1 30%",
+              flex: "1 1 45%",
               minWidth: "120px",
               border: selected ? "2px solid #ffc107" : "1px solid #ccc",
               borderRadius: "8px",
@@ -165,18 +145,17 @@ function RoomCheckout() {
     ampm: "AM",
   });
 
-  const [roomPaymentMethod, setRoomPaymentMethod] = React.useState("razorpay");
+  const [roomPaymentMethod, setRoomPaymentMethod] = React.useState("hotel");
   const [roomUtr, setRoomUtr] = React.useState("");
 
   const [orderPlaced, setOrderPlaced] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
-  const [payingNow, setPayingNow] = React.useState(false);
   const [authChecked, setAuthChecked] = React.useState(false);
 
   // ---- Parking flow states (unchanged) ----
   const PARKING_RATE_PER_DAY = 150;
   const [parkingChoice, setParkingChoice] = React.useState(null); // null | "yes" | "no"
-  const [parkingPaymentMethod, setParkingPaymentMethod] = React.useState("razorpay");
+  const [parkingPaymentMethod, setParkingPaymentMethod] = React.useState("hotel");
   const [parkingUtr, setParkingUtr] = React.useState("");
   const [parkingQrPending, setParkingQrPending] = React.useState(false);
   const [parkingForm, setParkingForm] = React.useState({
@@ -189,7 +168,6 @@ function RoomCheckout() {
   });
   const [parkingSubmitting, setParkingSubmitting] = React.useState(false);
   const [parkingBooked, setParkingBooked] = React.useState(false);
-  const [parkingPayingNow, setParkingPayingNow] = React.useState(false);
 
   // Live booked-slot list, fetched from backend
   const [parkingBookedSlots, setParkingBookedSlots] = React.useState([]);
@@ -438,92 +416,6 @@ function RoomCheckout() {
     }
   };
 
-  // ============================================================
-  // ---------- RAZORPAY PAYMENT FLOW (used by ROOM and PARKING) ----------
-  // amount = rupees (not paise); onSuccess(paymentId) called after
-  // backend verifies the payment signature.
-  // ============================================================
-  const startRazorpayPayment = async ({ amount, customerName, customerEmail, customerPhone, onSuccess, setBusy }) => {
-    setBusy(true);
-    try {
-      const scriptOk = await loadRazorpayScript();
-      if (!scriptOk) {
-        alert("Razorpay could not be loaded. Please check your internet connection and try again.");
-        setBusy(false);
-        return;
-      }
-
-      // Step 1: Backend la order create pannurom
-      const orderRes = await fetch("https://hotelheaven.onrender.com/api/create-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount }),
-      });
-      const orderData = await orderRes.json();
-
-      if (!orderData.orderId) {
-        console.error("Create order response:", orderData);
-        alert("Unable to create the payment order. Please check whether the backend server is running..");
-        setBusy(false);
-        return;
-      }
-
-      // Step 2: Razorpay checkout popup open pannurom
-      const options = {
-        key: orderData.keyId || RAZORPAY_KEY_ID,
-        amount: orderData.amount,
-        currency: orderData.currency,
-        name: "Hotel Heaven",
-        description: "Booking Payment",
-        order_id: orderData.orderId,
-        handler: async function (response) {
-          // Step 3: Payment success aana, backend la signature verify pannurom
-          try {
-            const verifyRes = await fetch("https://hotelheaven.onrender.com/api/verify-payment", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-              }),
-            });
-            const verifyData = await verifyRes.json();
-
-            if (verifyData.verified) {
-              onSuccess(response.razorpay_payment_id);
-            } else {
-              alert("Payment could not be verified. Even if the amount has been debited, the booking has not been confirmed. Please contact support.");
-            }
-          } catch (err) {
-            console.error("Verification call failed:", err);
-            alert("An error occurred while verifying the payment. Please contact support..");
-          } finally {
-            setBusy(false);
-          }
-        },
-        modal: {
-          ondismiss: function () {
-            setBusy(false);
-          },
-        },
-        prefill: {
-          name: customerName || "",
-          email: customerEmail || "",
-          contact: customerPhone || "",
-        },
-        theme: { color: "#ffc107" },
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.open();
-    } catch (err) {
-      console.error("Razorpay payment failed:", err);
-      alert("An error occurred while processing the payment. Please try again.");
-      setBusy(false);
-    }
-  };
-
   // ---------- Room booking submit: collects payment method, then books ----------
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -567,23 +459,12 @@ function RoomCheckout() {
 
     if (roomPaymentMethod === "hotel") {
       await placeRoomBooking("Pay at Hotel", "Pay at Hotel");
-    } else if (roomPaymentMethod === "qr") {
+    } else {
       if (!/^\d{12}$/.test(roomUtr)) {
         alert("Enter the 12-digit UTR / Reference No. from your UPI app 🔢");
         return;
       }
       await placeRoomBooking(`UPI QR (UTR: ${roomUtr})`, "Pending Verification", roomUtr);
-    } else {
-      startRazorpayPayment({
-        amount: total,
-        customerName: form.name,
-        customerEmail: form.email,
-        customerPhone: form.phone,
-        onSuccess: (paymentId) => {
-          placeRoomBooking(`Online Payment (Razorpay - ${paymentId})`, "Paid");
-        },
-        setBusy: setPayingNow,
-      });
     }
   };
 
@@ -614,23 +495,12 @@ function RoomCheckout() {
 
     if (parkingPaymentMethod === "hotel") {
       await placeParkingBooking("Pay at Hotel", "Pay at Hotel");
-    } else if (parkingPaymentMethod === "qr") {
+    } else {
       if (!/^\d{12}$/.test(parkingUtr)) {
         alert("Enter the 12-digit UTR / Reference No. from your UPI app 🔢");
         return;
       }
       await placeParkingBooking(`UPI QR (UTR: ${parkingUtr})`, "Pending Verification", parkingUtr);
-    } else {
-      startRazorpayPayment({
-        amount: parkingTotal,
-        customerName: parkingForm.name,
-        customerEmail: parkingForm.email,
-        customerPhone: parkingForm.vehicleNumber,
-        onSuccess: (paymentId) => {
-          placeParkingBooking(`Online Payment (Razorpay - ${paymentId})`, "Paid");
-        },
-        setBusy: setParkingPayingNow,
-      });
     }
   };
 
@@ -887,24 +757,20 @@ function RoomCheckout() {
                   type="button"
                   className="btn btn-light border fw-bold flex-fill"
                   onClick={() => setParkingChoice("no")}
-                  disabled={parkingSubmitting || parkingPayingNow}
+                  disabled={parkingSubmitting}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   className="btn btn-success fw-bold flex-fill"
-                  disabled={parkingSubmitting || parkingPayingNow || !parkingForm.slot}
+                  disabled={parkingSubmitting || !parkingForm.slot}
                 >
-                  {parkingPayingNow
-                    ? "Opening Payment..."
-                    : parkingSubmitting
+                  {parkingSubmitting
                     ? "Confirming..."
                     : parkingPaymentMethod === "hotel"
                     ? "Confirm Booking (Cash at Hotel)"
-                    : parkingPaymentMethod === "qr"
-                    ? "Submit Payment Details"
-                    : `Pay ₹${parkingTotal} Online`}
+                    : "Submit Payment Details"}
                 </button>
               </div>
             </form>
@@ -1128,17 +994,13 @@ function RoomCheckout() {
                 <button
                   type="submit"
                   className="btn btn-warning fw-bold w-100 mt-2"
-                  disabled={submitting || payingNow || !authChecked}
+                  disabled={submitting || !authChecked}
                 >
-                  {payingNow
-                    ? "Opening Payment..."
-                    : submitting
+                  {submitting
                     ? "Confirming..."
                     : roomPaymentMethod === "hotel"
                     ? "Confirm Booking (Cash at Hotel)"
-                    : roomPaymentMethod === "qr"
-                    ? "Submit Payment Details"
-                    : `Pay ₹${total} Online`}
+                    : "Submit Payment Details"}
                 </button>
               </form>
             </div>

@@ -2,33 +2,12 @@ import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import './HallCheckout.css';
 
-// ---------- Razorpay public Key ID (safe to expose in frontend - NOT the secret) ----------
-// Backend kudukkura keyId ye first use aagum; idhu just fallback.
-const RAZORPAY_KEY_ID = 'rzp_test_TeFdyXXi625Mk3';
-
 // Nandhini QR image -> frontend/public/nandhini-qr.jpeg
 const QR_IMAGE_SRC = '/nandhini-qr.jpeg';
 
-// ---------- Load the Razorpay Checkout.js script only once ----------
-function loadRazorpayScript() {
-  return new Promise((resolve) => {
-    if (document.getElementById('razorpay-checkout-js')) {
-      resolve(true);
-      return;
-    }
-    const script = document.createElement('script');
-    script.id = 'razorpay-checkout-js';
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
-  });
-}
-
-// ---------- 3 payment options: hotel | razorpay | qr ----------
+// ---------- 2 payment options: hotel | qr ----------
 const PAYMENT_OPTIONS = [
   { value: 'hotel', icon: '🏨', title: 'Cash at Hotel', sub: 'Pay at reception' },
-  { value: 'razorpay', icon: '💳', title: 'Online Payment', sub: 'Card / Netbanking' },
   { value: 'qr', icon: '📱', title: 'Pay with QR', sub: 'Scan & pay via UPI' },
 ];
 
@@ -42,7 +21,7 @@ function PaymentMethodSelector({ value, onChange }) {
             key={opt.value}
             onClick={() => onChange(opt.value)}
             style={{
-              flex: '1 1 30%',
+              flex: '1 1 45%',
               minWidth: '120px',
               border: selected ? '2px solid #ffc107' : '1px solid #ccc',
               borderRadius: '8px',
@@ -122,11 +101,10 @@ function HallCheckout() {
   });
   const [submitted, setSubmitted] = useState(false);
 
-  // ---------- Payment: "hotel" | "razorpay" | "qr" ----------
-  const [paymentMethod, setPaymentMethod] = useState('razorpay');
+  // ---------- Payment: "hotel" | "qr" ----------
+  const [paymentMethod, setPaymentMethod] = useState('hotel');
   const [utr, setUtr] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [payingNow, setPayingNow] = useState(false); // Razorpay modal open aagum pothu
   const [placedPayment, setPlacedPayment] = useState(null); // { label, status }
 
   if (!hall) {
@@ -162,7 +140,7 @@ function HallCheckout() {
   };
 
   // ---------- Actually save the hall booking to MongoDB ----------
-  // paymentStatus: "Paid" (Razorpay) | "Pending Verification" (QR) | "Pay at Hotel"
+  // paymentStatus: "Pending Verification" (QR) | "Pay at Hotel"
   const saveBooking = async (paymentLabel, paymentStatus, utrValue = '') => {
     setSubmitting(true);
     const bookingData = {
@@ -201,93 +179,6 @@ function HallCheckout() {
     }
   };
 
-  // ============================================================
-  // ---------- RAZORPAY PAYMENT FLOW ----------
-  // amount = rupees (not paise); onSuccess(paymentId) called after
-  // backend verifies the payment signature.
-  // ============================================================
-  const startRazorpayPayment = async ({ amount, onSuccess }) => {
-    setPayingNow(true);
-    try {
-      const scriptOk = await loadRazorpayScript();
-      if (!scriptOk) {
-        alert('Razorpay could not be loaded. Please check your internet connection and try again.');
-        setPayingNow(false);
-        return;
-      }
-
-      // Step 1: Backend la order create pannurom
-      const orderRes = await fetch('https://hotelheaven.onrender.com/api/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount }),
-      });
-      const orderData = await orderRes.json();
-
-      if (!orderData.orderId) {
-        console.error('Create order response:', orderData);
-        alert('Unable to create the payment order. Please check whether the backend server is running.');
-        setPayingNow(false);
-        return;
-      }
-
-      // Step 2: Razorpay checkout popup open pannurom
-      const options = {
-        key: orderData.keyId || RAZORPAY_KEY_ID,
-        amount: orderData.amount,
-        currency: orderData.currency,
-        name: 'Hotel Heaven',
-        description: 'Hall Booking Payment',
-        order_id: orderData.orderId,
-        handler: async function (response) {
-          // Step 3: Payment success aana, backend la signature verify pannurom
-          try {
-            const verifyRes = await fetch('https://hotelheaven.onrender.com/api/verify-payment', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-              }),
-            });
-            const verifyData = await verifyRes.json();
-
-            if (verifyData.verified) {
-              onSuccess(response.razorpay_payment_id);
-            } else {
-              alert('Payment could not be verified. Even if the amount has been debited, your booking has not been confirmed. Please contact support.');
-            }
-          } catch (err) {
-            console.error('Verification call failed:', err);
-            alert('An error occurred while verifying the payment. Please contact support.');
-          } finally {
-            setPayingNow(false);
-          }
-        },
-        modal: {
-          // User checkout popup ah close pannitanunu, busy state reset pannurom
-          ondismiss: function () {
-            setPayingNow(false);
-          },
-        },
-        prefill: {
-          name: formData.name || '',
-          email: formData.email || '',
-          contact: formData.phone || '',
-        },
-        theme: { color: '#ffc107' },
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.open();
-    } catch (err) {
-      console.error('Razorpay payment failed:', err);
-      alert('An error occurred while processing the payment. Please try again.');
-      setPayingNow(false);
-    }
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -296,21 +187,13 @@ function HallCheckout() {
     if (paymentMethod === 'hotel') {
       // No payment now - pay at reception
       await saveBooking('Pay at Hotel', 'Pay at Hotel');
-    } else if (paymentMethod === 'qr') {
+    } else {
       // QR payment - UTR kudutha aprom booking "Pending Verification" nu save aagum
       if (!/^\d{12}$/.test(utr)) {
         alert('Enter the 12-digit UTR / Reference No. from your UPI app 🔢');
         return;
       }
       await saveBooking(`UPI QR (UTR: ${utr})`, 'Pending Verification', utr);
-    } else {
-      // Real Razorpay payment - popup open aagum, success aana booking save aagum
-      startRazorpayPayment({
-        amount: hall.price,
-        onSuccess: (paymentId) => {
-          saveBooking(`Online Payment (Razorpay - ${paymentId})`, 'Paid');
-        },
-      });
     }
   };
 
@@ -401,17 +284,13 @@ function HallCheckout() {
           <button
             type="submit"
             className="confirm-btn"
-            disabled={submitting || payingNow}
+            disabled={submitting}
           >
-            {payingNow
-              ? 'Opening Payment...'
-              : submitting
+            {submitting
               ? 'Confirming...'
               : paymentMethod === 'hotel'
               ? 'Confirm Booking (Cash at Hotel)'
-              : paymentMethod === 'qr'
-              ? 'Submit Payment Details'
-              : `Pay ₹${hall.price.toLocaleString()} Online`}
+              : 'Submit Payment Details'}
           </button>
         </form>
       </div>
