@@ -43,7 +43,8 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 
 # ---------- Gemini Setup ----------
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=GEMINI_API_KEY)
+# transport="rest": Render la grpc connection hang aagi worker timeout aagudhu, so REST use pannurom
+genai.configure(api_key=GEMINI_API_KEY, transport="rest")
 gemini_model = genai.GenerativeModel("gemini-3.1-flash-lite")
 
 # ---------- Razorpay Setup ----------
@@ -1473,7 +1474,8 @@ def chatbot():
         live_info = get_live_availability()
         full_prompt = f"{HOTEL_CONTEXT}\n{live_info}\n\nCustomer: {user_message}\nAssistant:"
 
-        response = gemini_model.generate_content(full_prompt)
+        # 20 sec timeout: gunicorn worker 30 sec la kill pannidum, adhuku munnadiye friendly error kudukkanum
+        response = gemini_model.generate_content(full_prompt, request_options={"timeout": 20})
         reply_text = response.text
 
         return jsonify({"reply": reply_text}), 200
