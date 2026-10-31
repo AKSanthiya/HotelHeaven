@@ -45,7 +45,9 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # transport="rest": Render la grpc connection hang aagi worker timeout aagudhu, so REST use pannurom
 genai.configure(api_key=GEMINI_API_KEY, transport="rest")
-gemini_model = genai.GenerativeModel("gemini-3.1-flash-lite")
+# Primary model first; 503 (high demand) vandha next model try pannum
+GEMINI_MODEL_NAMES = ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-2.5-flash"]
+gemini_models = [genai.GenerativeModel(name) for name in GEMINI_MODEL_NAMES]
 
 # ---------- Razorpay Setup ----------
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
@@ -1474,13 +1476,24 @@ def chatbot():
         live_info = get_live_availability()
         full_prompt = f"{HOTEL_CONTEXT}\n{live_info}\n\nCustomer: {user_message}\nAssistant:"
 
-        # timeout 15 + retry None: Gemini fail aanaa thirumba thirumba retry pannaama udane error kudukkum,
-        # appo gunicorn worker (30 sec) kill aagaadhu, friendly reply kudukka mudiyum
-        response = gemini_model.generate_content(
-            full_prompt,
-            request_options={"timeout": 15, "retry": None}
-        )
-        reply_text = response.text
+        # Oru model 503 (high demand) / error kudutha, udane next model try pannum.
+        # Each try ku 8 sec timeout + retry None, so gunicorn 30 sec kulla mudinjidum.
+        reply_text = None
+        last_error = None
+        for model in gemini_models:
+            try:
+                response = model.generate_content(
+                    full_prompt,
+                    request_options={"timeout": 8, "retry": None}
+                )
+                reply_text = response.text
+                break
+            except Exception as model_error:
+                last_error = model_error
+                print("Gemini model failed, trying next:", model_error)
+
+        if reply_text is None:
+            raise last_error
 
         return jsonify({"reply": reply_text}), 200
 
