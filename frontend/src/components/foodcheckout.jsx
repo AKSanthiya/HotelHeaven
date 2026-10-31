@@ -168,20 +168,18 @@ function FoodCheckout() {
       .catch((err) => console.error("Voucher re-check failed:", err));
   }, [authChecked, voucherId]);
 
-  // Fetch already-booked tables from existing food bookings
+  // Fetch currently occupied tables.
+  // Backend (/api/booked-tables) returns only tables the admin has NOT released yet,
+  // e.g. ["Table 3 (2 Chairs)", "Table 1 (4 Chairs)"].
+  // Admin la "Customer left? Yes" nu kudutha andha table indha list la irundhu remove aagidum.
   React.useEffect(() => {
     const fetchBookedTables = async () => {
       try {
         const res = await fetch(
-          "https://hotelheaven.onrender.com/api/bookings?type=food"
+          "https://hotelheaven.onrender.com/api/booked-tables"
         );
         const data = await res.json();
-        const booked = data
-          .map((b) => b.details?.tableNumber)
-          .filter(
-            (t) => t && t !== "Not dining in" // ignore delivery/pickup orders
-          );
-        setBookedTables(booked);
+        setBookedTables(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error("Failed to fetch booked tables:", err);
       }
