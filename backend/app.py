@@ -797,6 +797,7 @@ def create_booking():
         "checkoutReminderSent": False,   # used by the reminder scheduler below
         "roomReleased": False,           # room bookings: checkout mudinja aprm True aagum (auto-release)
         "hallReleased": False,           # hall bookings: booking date mudinja aprm True aagum (auto-release)
+        "parkingReleased": False,        # parking bookings: admin "customer left? Yes" nu kudutha True aagum (manual release)
         "createdAt": created_at.isoformat() + "Z"
     }
 
@@ -1029,7 +1030,7 @@ def get_booked_parking():
     so Parking page can mark them Red (booked) vs Green (available).
     A slot counts as booked unless its booking was rejected."""
     parking_bookings = bookings_collection.find(
-        {"type": "parking", "status": {"$ne": "rejected"}},
+        {"type": "parking", "status": {"$ne": "rejected"}, "parkingReleased": {"$ne": True}},
         {"details.slot": 1}
     )
     booked_slots = []
@@ -1038,6 +1039,39 @@ def get_booked_parking():
         if slot:
             booked_slots.append(slot)
     return jsonify(booked_slots), 200
+
+
+@app.route('/api/booking/release/<booking_id>', methods=['POST'])
+def release_booking(booking_id):
+    """Admin: "Customer left? Yes" nu choose panna indha endpoint call aagum.
+    Room / Hall / Parking booking ah manual ah release pannum, so andha room / hall / slot
+    thirumba "available" aagum. Booking record delete aagadhu (history, analytics apdiye irukkum).
+    Body: { "leftConfirmed": true }  (false / illa na onnum nadakkadhu)"""
+    data = request.get_json() or {}
+    if data.get("leftConfirmed") is not True:
+        return jsonify({"message": "No change - customer has not left"}), 200
+
+    try:
+        booking = bookings_collection.find_one({"_id": ObjectId(booking_id)})
+    except Exception:
+        return jsonify({"error": "Invalid booking id"}), 400
+
+    if not booking:
+        return jsonify({"error": "Booking not found"}), 404
+
+    release_fields = {"room": "roomReleased", "hall": "hallReleased", "parking": "parkingReleased"}
+    field = release_fields.get(booking.get("type"))
+    if not field:
+        return jsonify({"error": "Only room, hall or parking bookings can be released"}), 400
+    if booking.get("status") != "confirmed":
+        return jsonify({"error": f"Only confirmed bookings can be released (current status: {booking.get('status')})"}), 400
+
+    now = datetime.utcnow().isoformat() + "Z"
+    bookings_collection.update_one(
+        {"_id": booking["_id"]},
+        {"$set": {field: True, field + "At": now, "releasedByAdmin": True}}
+    )
+    return jsonify({"message": "Released - now available again", "released": True}), 200
 
 
 # ---------- Voucher Logic ----------
@@ -1451,7 +1485,7 @@ def get_live_availability():
         )
     ]
     booked_slots = []
-    for b in bookings_collection.find({"type": "parking", "status": {"$ne": "rejected"}}, {"details.slot": 1}):
+    for b in bookings_collection.find({"type": "parking", "status": {"$ne": "rejected"}, "parkingReleased": {"$ne": True}}, {"details.slot": 1}):
         slot = b.get("details", {}).get("slot")
         if slot:
             booked_slots.append(slot)
