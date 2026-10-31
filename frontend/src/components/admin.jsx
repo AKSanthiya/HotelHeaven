@@ -406,6 +406,42 @@ function Admin() {
     }
   }
 
+  // ---------- "Customer left?" -> Yes : room / hall / parking slot / table release ----------
+  // Backend: POST /api/booking/release/<id>  body: { leftConfirmed: true }
+  async function handleRelease(booking) {
+    const what =
+      booking.type === "food"
+        ? `table (${booking.details?.tableNumber})`
+        : booking.type === "parking"
+        ? `parking slot (${booking.details?.slot || booking.itemName})`
+        : `${booking.type} (${booking.itemName})`;
+
+    if (
+      !window.confirm(
+        `Customer ${what} ah vittu poitaara? Yes na, idhu thirumba available aagidum.`
+      )
+    ) {
+      return;
+    }
+
+    setActionId(booking._id);
+    setActionError("");
+    try {
+      const res = await fetch(`${API_BASE}/api/booking/release/${booking._id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leftConfirmed: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Release failed");
+      await fetchBookings();
+    } catch (err) {
+      setActionError(err.message || "Could not release this booking.");
+    } finally {
+      setActionId(null);
+    }
+  }
+
   // ---------- Delete a booking (oru row) ----------
   // Backend: DELETE /api/booking/<id>
   async function handleDelete(bookingId) {
@@ -455,6 +491,47 @@ function Admin() {
           Reject
         </button>
       </div>
+    );
+  }
+
+  // "Customer left?" No / Yes dropdown.
+  // - Yes select pannina confirm kekkum, apram room / hall / slot / table available aagidum.
+  // - Already release aagirundha "Released ✓" nu kaattum.
+  // - Release panna vendiya booking illa na (pending / rejected / table illaadha food) "-".
+  function CustomerLeftCell({ booking }) {
+    const released =
+      booking.tableReleased ||
+      booking.parkingReleased ||
+      booking.hallReleased ||
+      booking.roomReleased;
+
+    if (released) {
+      return <span className="badge bg-secondary">Released ✓</span>;
+    }
+
+    const table = booking.details?.tableNumber;
+    const canRelease =
+      booking.type === "food"
+        ? Boolean(table) && table !== "Not dining in"
+        : booking.status === "confirmed";
+
+    if (!canRelease) {
+      return <span className="text-muted">-</span>;
+    }
+
+    return (
+      <select
+        className="form-select form-select-sm"
+        style={{ minWidth: "80px" }}
+        value="No"
+        disabled={actionId === booking._id}
+        onChange={(e) => {
+          if (e.target.value === "Yes") handleRelease(booking);
+        }}
+      >
+        <option value="No">No</option>
+        <option value="Yes">Yes</option>
+      </select>
     );
   }
 
@@ -1027,7 +1104,8 @@ function Admin() {
               )}
 
               {/* Room / Hall / Parking: same columns, all get Status + Approve/Reject.
-                  Room additionally shows Check-in/Checkout timings. */}
+                  Room additionally shows Check-in/Checkout timings.
+                  "Customer left?" = admin manual release (Yes -> available again). */}
               {!loading && APPROVAL_REQUIRED_TYPES.includes(filter) && bookings.length > 0 && (
                 <div className="table-responsive">
                   <table className="table table-striped table-bordered">
@@ -1050,6 +1128,7 @@ function Admin() {
                         <th>Payment Method</th>
                         <th>Status</th>
                         <th>Action</th>
+                        <th>Customer left?</th>
                         <th>Price</th>
                         <th>Booked On</th>
                         <th>Delete</th>
@@ -1084,6 +1163,9 @@ function Admin() {
                             <td>
                               <ApproveRejectButtons booking={b} />
                             </td>
+                            <td>
+                              <CustomerLeftCell booking={b} />
+                            </td>
                             <td>{b.price}</td>
                             <td>{new Date(b.createdAt).toLocaleString()}</td>
                             <td>
@@ -1103,7 +1185,7 @@ function Admin() {
                 </div>
               )}
 
-              {/* Food: unchanged, no approval flow */}
+              {/* Food: no approval flow. "Customer left?" = table release (Yes -> table available again) */}
               {!loading && filter === "food" && bookings.length > 0 && (
                 <div className="table-responsive">
                   <table className="table table-striped table-bordered">
@@ -1120,6 +1202,7 @@ function Admin() {
                         <th>Booking Date</th>
                         <th>Price</th>
                         <th>Payment</th>
+                        <th>Customer left?</th>
                         <th>Booked On</th>
                         <th>Delete</th>
                       </tr>
@@ -1141,6 +1224,9 @@ function Admin() {
                           <td>{b.price}</td>
                           <td>
                             <PaymentCell b={b} />
+                          </td>
+                          <td>
+                            <CustomerLeftCell booking={b} />
                           </td>
                           <td>{new Date(b.createdAt).toLocaleString()}</td>
                           <td>

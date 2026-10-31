@@ -1024,6 +1024,23 @@ def get_booked_halls():
     return jsonify(booked_names), 200
 
 
+@app.route('/api/booked-tables', methods=['GET'])
+def get_booked_tables():
+    """Returns tableNumber list of tables that are CURRENTLY occupied (dine-in food orders
+    whose table the admin has not released yet). Admin "Customer left? Yes" nu kudutha
+    andha table indha list la irundhu remove aagi, thirumba available aagum."""
+    food_orders = bookings_collection.find(
+        {"type": "food", "tableReleased": {"$ne": True}},
+        {"details.tableNumber": 1}
+    )
+    booked_tables = []
+    for b in food_orders:
+        table = (b.get("details", {}) or {}).get("tableNumber")
+        if table and table != "Not dining in" and table not in booked_tables:
+            booked_tables.append(table)
+    return jsonify(booked_tables), 200
+
+
 @app.route('/api/booked-parking', methods=['GET'])
 def get_booked_parking():
     """Returns list of slot codes (e.g. B1, C5, O10) that are already booked,
@@ -1059,10 +1076,14 @@ def release_booking(booking_id):
     if not booking:
         return jsonify({"error": "Booking not found"}), 404
 
-    release_fields = {"room": "roomReleased", "hall": "hallReleased", "parking": "parkingReleased"}
+    release_fields = {"room": "roomReleased", "hall": "hallReleased", "parking": "parkingReleased", "food": "tableReleased"}
     field = release_fields.get(booking.get("type"))
     if not field:
-        return jsonify({"error": "Only room, hall or parking bookings can be released"}), 400
+        return jsonify({"error": "Only room, hall, parking or food (table) bookings can be released"}), 400
+    if booking.get("type") == "food":
+        table = (booking.get("details", {}) or {}).get("tableNumber")
+        if not table or table == "Not dining in":
+            return jsonify({"error": "This food order has no table to release"}), 400
     if booking.get("status") != "confirmed":
         return jsonify({"error": f"Only confirmed bookings can be released (current status: {booking.get('status')})"}), 400
 
