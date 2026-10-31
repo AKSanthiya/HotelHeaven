@@ -1474,8 +1474,12 @@ def chatbot():
         live_info = get_live_availability()
         full_prompt = f"{HOTEL_CONTEXT}\n{live_info}\n\nCustomer: {user_message}\nAssistant:"
 
-        # 20 sec timeout: gunicorn worker 30 sec la kill pannidum, adhuku munnadiye friendly error kudukkanum
-        response = gemini_model.generate_content(full_prompt, request_options={"timeout": 20})
+        # timeout 15 + retry None: Gemini fail aanaa thirumba thirumba retry pannaama udane error kudukkum,
+        # appo gunicorn worker (30 sec) kill aagaadhu, friendly reply kudukka mudiyum
+        response = gemini_model.generate_content(
+            full_prompt,
+            request_options={"timeout": 15, "retry": None}
+        )
         reply_text = response.text
 
         return jsonify({"reply": reply_text}), 200
